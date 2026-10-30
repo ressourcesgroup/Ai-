@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+      - name: Unit tests
+        run: pytest -q
+      - name: GRIB harness sanity (oracle must be 100%, empty must be 0%)
+        run: |
+          python -m godmode grib --adapter reference | tee ref.json
+          python -m godmode grib --adapter empty | tee empty.json
+          python -c "import json; assert json.load(open('ref.json'))['pass_rate'] == 1.0; assert json.load(open('empty.json'))['pass_rate'] == 0.0"
+
+  official-luau-syntax:
+    # Cross-checks the Python structural checker against the official Luau
+    # compiler. Not yet verified to run (could not execute downloaded binaries
+    # in the build sandbox), so it is non-blocking until its first green run.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Luau
+        run: |
+          curl -sSL -o luau.zip https://github.com/luau-lang/luau/releases/latest/download/luau-ubuntu.zip
+          unzip -q luau.zip -d luau-bin
+          ls luau-bin
+      - name: Compile every seed-corpus file (syntax check)
+        run: |
+          for f in data/seed_corpus/*.luau; do
+            ./luau-bin/luau-compile --null "$f" || { echo "FAIL: $f"; exit 1; }
+          done

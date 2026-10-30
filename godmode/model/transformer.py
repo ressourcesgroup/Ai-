@@ -228,7 +228,7 @@ class GodmodeLM(nn.Module):
 
         loss = lm_loss = None
         if targets is not None:
-            lm_loss = F.cross_entropy(logits.float().view(-1, logits.size(-1)), targets.view(-1), ignore_index=-100)
+            lm_loss = F.cross_entropy(logits.float().reshape(-1, logits.size(-1)), targets.reshape(-1), ignore_index=-100)
             loss = lm_loss
             if stats:
                 aux = torch.stack([s.aux_loss for s in stats]).mean()
