@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "godmode"
+version = "0.1.0"
+description = "PROJECT GODMODE: an independent, from-scratch foundation model research stack for Roblox/Luau development"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["torch>=2.1", "numpy>=1.24"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+godmode = "godmode.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["godmode*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
