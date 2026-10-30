@@ -5,3 +5,4 @@ __pycache__/
 runs/
 *.pt
 !experiments/**/*.json
+data/external/*/*.jsonl

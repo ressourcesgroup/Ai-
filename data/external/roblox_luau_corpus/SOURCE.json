@@ -1,0 +1,9 @@
+{
+  "name": "roblox-luau-corpus",
+  "license": "MIT",
+  "format": "prompt_completion",
+  "origin": "https://huggingface.co/datasets/Roblox/luau_corpus (Roblox Luau Data Sharing program; only experiences whose creators opted in)",
+  "attribution": "Copyright Roblox Corporation; MIT license. Notice reproduced in README.md of this directory.",
+  "third_party": true,
+  "fetch": "python -m godmode fetch-data roblox-luau-corpus"
+}

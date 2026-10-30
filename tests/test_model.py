@@ -92,3 +92,21 @@ def test_config_validation():
         ModelConfig(d_model=30, n_heads=4)
     with pytest.raises(ValueError):
         ModelConfig(n_experts=2, top_k=3)
+
+
+def test_generate_batch_with_stop_ids_and_mode_restore():
+    m = make()
+    m.train()
+    prompt = torch.randint(0, 97, (3, 4))
+    out = m.generate(prompt, 12, temperature=1.0, stop_ids={5, 6, 7}, generator=torch.Generator().manual_seed(0))
+    assert out.shape[0] == 3 and m.training
+    for row in out[:, 4:].tolist():
+        if any(t in (5, 6, 7) for t in row):
+            first = next(i for i, t in enumerate(row) if t in (5, 6, 7))
+            assert all(t == row[first] for t in row[first:])  # stopped rows stay stopped
+
+
+def test_generate_truncates_overlong_prompt():
+    m = make()
+    out = m.generate(torch.randint(0, 97, (1, 100)), 5, temperature=0)
+    assert out.shape[1] <= 32

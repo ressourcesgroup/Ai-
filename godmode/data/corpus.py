@@ -16,7 +16,7 @@ from typing import Iterable
 
 import numpy as np
 
-from ..luau import check_structure, lint
+from ..luau import LuauSyntaxError, check_structure, lint, tokenize
 
 ALLOWED_LICENSES = frozenset({"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0", "Unlicense", "CC-BY-4.0"})
 LUAU_EXTENSIONS = (".luau", ".lua")
@@ -56,15 +56,31 @@ def load_source_dir(directory: str | Path) -> list[Document]:
         raise PermissionError(f"{directory}: license {lic!r} is not on the allow-list {sorted(ALLOWED_LICENSES)}")
     docs = []
     for path in sorted(directory.rglob("*")):
-        if path.suffix in LUAU_EXTENSIONS and path.is_file():
+        if not path.is_file():
+            continue
+        if path.suffix in LUAU_EXTENSIONS:
             docs.append(Document(path.read_text(encoding="utf-8"), meta["name"], lic, str(path)))
+        elif path.suffix == ".jsonl" and meta.get("format") == "prompt_completion":
+            # Fragment datasets: the prompt (usually a comment) followed by its completion is one document.
+            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+                if line.strip():
+                    rec = json.loads(line)
+                    docs.append(Document(rec["prompt"] + rec["completion"], meta["name"], lic, f"{path}#{i}",
+                                         meta={"upstream_split": path.stem}))
     return docs
 
 
 def normalize_for_dedup(text: str) -> str:
-    text = re.sub(r"--\[(=*)\[.*?\]\1\]", "", text, flags=re.S)
-    text = re.sub(r"--[^\n]*", "", text)
-    return re.sub(r"\s+", " ", text).strip()
+    """Comment- and whitespace-insensitive form used for duplicate detection.
+
+    Uses the Luau lexer so `--` inside strings is not mistaken for a comment;
+    falls back to whitespace normalization for text the lexer rejects (prose,
+    chat transcripts), where stripping "comments" would be wrong anyway.
+    """
+    try:
+        return " ".join(t.value for t in tokenize(text) if t.kind != "eof")
+    except LuauSyntaxError:
+        return re.sub(r"\s+", " ", text).strip()
 
 
 def quality_check(doc: Document, min_chars: int = 40, max_chars: int = 200_000) -> str | None:
@@ -88,57 +104,88 @@ def quality_check(doc: Document, min_chars: int = 40, max_chars: int = 200_000) 
 
 
 class MinHasher:
-    """MinHash over token 5-shingles for near-duplicate detection (Broder 1997)."""
+    """MinHash over token 5-shingles for near-duplicate detection (Broder 1997).
+
+    Uses the Mersenne prime 2^31 - 1 so (a*h + b) fits in uint64 and all
+    permutations are computed in one vectorized numpy expression.
+    """
+
+    PRIME = (1 << 31) - 1
 
     def __init__(self, num_perm: int = 64, shingle: int = 5, seed: int = 0):
         rng = np.random.default_rng(seed)
-        self.prime = np.uint64((1 << 61) - 1)
-        self.a = rng.integers(1, (1 << 61) - 1, size=num_perm, dtype=np.uint64)
-        self.b = rng.integers(0, (1 << 61) - 1, size=num_perm, dtype=np.uint64)
+        self.a = rng.integers(1, self.PRIME, size=num_perm, dtype=np.uint64)
+        self.b = rng.integers(0, self.PRIME, size=num_perm, dtype=np.uint64)
         self.shingle = shingle
 
     def signature(self, text: str) -> np.ndarray:
         words = re.findall(r"\w+|[^\w\s]", text)
         k = self.shingle
         grams = {" ".join(words[i : i + k]) for i in range(max(1, len(words) - k + 1))}
-        hashes = np.array(
-            [int.from_bytes(hashlib.blake2b(g.encode(), digest_size=8).digest(), "little") >> 3 for g in grams],
-            dtype=np.uint64,
+        hashes = np.fromiter(
+            (int.from_bytes(hashlib.blake2b(g.encode(), digest_size=4).digest(), "little") & self.PRIME for g in grams),
+            dtype=np.uint64, count=len(grams),
         )
-        # (a*h + b) mod p, computed in Python ints per permutation to avoid uint64 overflow.
-        sig = np.empty(len(self.a), dtype=np.uint64)
-        hs = [int(h) for h in hashes]
-        p = int(self.prime)
-        for j, (a, b) in enumerate(zip(self.a.tolist(), self.b.tolist())):
-            sig[j] = min((a * h + b) % p for h in hs)
-        return sig
+        return ((self.a[:, None] * hashes[None, :] + self.b[:, None]) % np.uint64(self.PRIME)).min(axis=1)
 
     @staticmethod
     def similarity(s1: np.ndarray, s2: np.ndarray) -> float:
         return float((s1 == s2).mean())
 
 
+class LSHIndex:
+    """Banded LSH over MinHash signatures: near-linear candidate retrieval."""
+
+    def __init__(self, bands: int = 16):
+        self.bands = bands
+        self.tables: list[dict[bytes, list[int]]] = [{} for _ in range(bands)]
+        self.sigs: list[np.ndarray] = []
+
+    def _keys(self, sig: np.ndarray):
+        rows = len(sig) // self.bands
+        return (sig[i * rows : (i + 1) * rows].tobytes() for i in range(self.bands))
+
+    def query(self, sig: np.ndarray, threshold: float) -> int | None:
+        seen: set[int] = set()
+        for table, key in zip(self.tables, self._keys(sig)):
+            for j in table.get(key, ()):
+                if j not in seen:
+                    seen.add(j)
+                    if MinHasher.similarity(sig, self.sigs[j]) >= threshold:
+                        return j
+        return None
+
+    def add(self, sig: np.ndarray) -> int:
+        idx = len(self.sigs)
+        self.sigs.append(sig)
+        for table, key in zip(self.tables, self._keys(sig)):
+            table.setdefault(key, []).append(idx)
+        return idx
+
+
 def build_corpus(docs: Iterable[Document], near_dup_threshold: float = 0.85) -> tuple[list[Document], FilterReport]:
     report = FilterReport()
     seen_exact: set[str] = set()
     hasher = MinHasher()
-    signatures: list[np.ndarray] = []
+    index = LSHIndex()
     kept: list[Document] = []
     for doc in docs:
         reason = quality_check(doc)
         if reason:
             report.reject(reason)
             continue
-        key = hashlib.sha256(normalize_for_dedup(doc.text).encode()).hexdigest()
+        norm = normalize_for_dedup(doc.text)
+        key = hashlib.sha256(norm.encode()).hexdigest()
         if key in seen_exact:
             report.reject("exact_duplicate")
             continue
-        sig = hasher.signature(normalize_for_dedup(doc.text))
-        if any(MinHasher.similarity(sig, s) >= near_dup_threshold for s in signatures):
+        sig = hasher.signature(norm)
+        if index.query(sig, near_dup_threshold) is not None:
             report.reject("near_duplicate")
             continue
         seen_exact.add(key)
-        signatures.append(sig)
+        index.add(sig)
+        doc.meta["minhash"] = sig  # reused by cluster-aware splitting
         kept.append(doc)
         report.accepted += 1
     return kept, report

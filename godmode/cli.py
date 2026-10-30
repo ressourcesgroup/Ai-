@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 from dataclasses import asdict
 from pathlib import Path
@@ -14,8 +15,35 @@ SEED_CORPUS = "data/seed_corpus"
 GRIB_TASKS = "benchmarks/grib/tasks_v0.jsonl"
 
 
+EXTERNAL_SOURCES = {
+    "roblox-luau-corpus": (
+        "data/external/roblox_luau_corpus",
+        "https://huggingface.co/datasets/Roblox/luau_corpus/resolve/main/",
+        ["train.jsonl", "test.jsonl"],
+    ),
+}
+
+
+def cmd_fetch_data(args) -> None:
+    """Download a registered external dataset next to its committed SOURCE.json."""
+    import ssl
+    import urllib.request
+
+    directory, base, files = EXTERNAL_SOURCES[args.name]
+    cafile = os.environ.get("SSL_CERT_FILE") or os.environ.get("REQUESTS_CA_BUNDLE")
+    ctx = ssl.create_default_context(cafile=cafile)
+    for f in files:
+        dest = Path(directory) / f
+        if dest.exists() and not args.force:
+            print(f"exists: {dest}")
+            continue
+        with urllib.request.urlopen(base + f, context=ctx, timeout=300) as r, dest.open("wb") as out:
+            out.write(r.read())
+        print(f"fetched {dest} ({dest.stat().st_size / 1e6:.1f} MB)")
+
+
 def cmd_build_data(args) -> None:
-    from .data import build_corpus, generate, load_source_dir, pack, split_documents, write_manifest
+    from .data import build_corpus, generate, load_source_dir, ngram_overlap, pack, split_clustered, write_manifest
     from .tokenizer import BPETokenizer
 
     docs = []
@@ -24,21 +52,26 @@ def cmd_build_data(args) -> None:
     samples, rejected = generate(args.synthetic, seed=args.seed)
     docs += [s.to_document() for s in samples]
     kept, report = build_corpus(docs)
-    train_docs, val_docs = split_documents(kept, args.val_fraction)
+    train_docs, val_docs, test_docs = split_clustered(kept, args.val_fraction, args.test_fraction, args.cluster_threshold)
+    if not val_docs or not test_docs:
+        raise SystemExit(f"split too small (val={len(val_docs)}, test={len(test_docs)} docs): add more distinct data or raise fractions")
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     tok = BPETokenizer.train([d.text for d in train_docs], vocab_size=args.vocab_size)
     tok.save(out / "tokenizer.json")
-    train_ids, val_ids = pack(train_docs, tok), pack(val_docs, tok)
+    train_ids, val_ids, test_ids = pack(train_docs, tok), pack(val_docs, tok), pack(test_docs, tok)
     np.save(out / "train.npy", train_ids)
     np.save(out / "val.npy", val_ids)
+    np.save(out / "test.npy", test_ids)
     write_manifest(kept, report, out / "manifest.json")
     (out / "train_texts.json").write_text(json.dumps([d.text for d in train_docs]))
     summary = {
-        "documents": len(kept), "train_docs": len(train_docs), "val_docs": len(val_docs),
+        "documents": len(kept), "train_docs": len(train_docs), "val_docs": len(val_docs), "test_docs": len(test_docs),
+        "leakage_13gram": {"val_in_train": ngram_overlap([d.text for d in val_docs], [d.text for d in train_docs]),
+                           "test_in_train": ngram_overlap([d.text for d in test_docs], [d.text for d in train_docs])},
         "synthetic_rejected_by_verifier": rejected, "filter": asdict(report),
-        "vocab_size": tok.vocab_size, "train_tokens": int(len(train_ids)), "val_tokens": int(len(val_ids)),
+        "vocab_size": tok.vocab_size, "train_tokens": int(len(train_ids)), "val_tokens": int(len(val_ids)), "test_tokens": int(len(test_ids)),
         "chars_per_token": round(sum(len(d.text) for d in train_docs) / max(1, len(train_ids)), 3),
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
@@ -49,7 +82,8 @@ def _load_data(data_dir: str):
     from .tokenizer import BPETokenizer
 
     d = Path(data_dir)
-    return BPETokenizer.load(d / "tokenizer.json"), np.load(d / "train.npy"), np.load(d / "val.npy")
+    test = np.load(d / "test.npy") if (d / "test.npy").exists() else None
+    return BPETokenizer.load(d / "tokenizer.json"), np.load(d / "train.npy"), np.load(d / "val.npy"), test
 
 
 def _model_config(path: str, tok):
@@ -63,13 +97,15 @@ def _model_config(path: str, tok):
 def cmd_train(args) -> None:
     from .train import TrainConfig, train
 
-    tok, tr, va = _load_data(args.data)
+    tok, tr, va, te = _load_data(args.data)
     mcfg = _model_config(args.config, tok)
     tcfg = TrainConfig(steps=args.steps, batch_size=args.batch_size, seq_len=args.seq_len, lr=args.lr,
-                       seed=args.seed, out_dir=args.out, eval_every=args.eval_every)
-    result = train(mcfg, tcfg, tok, tr, va)
-    result.pop("history")
-    print(json.dumps(result, indent=2))
+                       seed=args.seed, out_dir=args.out, eval_every=args.eval_every, device=args.device,
+                       precision=args.precision, grad_accum=args.grad_accum)
+    result = train(mcfg, tcfg, tok, tr, va, test_tokens=te)
+    result.pop("history", None)
+    if "rank" not in result:
+        print(json.dumps(result, indent=2))
 
 
 def cmd_generate(args) -> None:
@@ -111,7 +147,7 @@ def cmd_experiment(args) -> None:
     from .research import ExperimentRecord, Registry, promotion_gate
     from .train import TrainConfig, train
 
-    tok, tr, va = _load_data(args.data)
+    tok, tr, va, te = _load_data(args.data)
     arms = {Path(c).stem: _model_config(c, tok) for c in args.configs}
     per_arm: dict[str, dict[str, list[float]]] = {}
     details: dict[str, dict] = {}
@@ -120,8 +156,9 @@ def cmd_experiment(args) -> None:
         for seed in args.seeds:
             tcfg = TrainConfig(steps=args.steps, batch_size=args.batch_size, seq_len=args.seq_len, lr=args.lr,
                                seed=seed, out_dir=f"runs/{args.name}/{name}/seed{seed}", eval_every=args.steps)
-            res = train(mcfg, tcfg, tok, tr, va, log=lambda *_: None)
-            per_arm[name]["val_loss"].append(res["best_val_loss"])
+            res = train(mcfg, tcfg, tok, tr, va, log=lambda *_: None, test_tokens=te)
+            # Report held-out test loss of the val-selected checkpoint; fall back to val if no test split.
+            per_arm[name]["val_loss"].append(res.get("test_loss", res["best_val_loss"]))
             per_arm[name]["wall_time_s"].append(res["wall_time_s"])
             details[name] = {"params_total": res["params_total"], "params_active": res["params_active"], "config": mcfg.to_dict()}
             print(f"{name} seed={seed} val_loss={res['best_val_loss']} time={res['wall_time_s']}s")
@@ -154,11 +191,18 @@ def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="godmode", description="PROJECT GODMODE research stack")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    f = sub.add_parser("fetch-data", help="download a registered external dataset (license recorded in its SOURCE.json)")
+    f.add_argument("name", choices=sorted(EXTERNAL_SOURCES))
+    f.add_argument("--force", action="store_true")
+    f.set_defaults(fn=cmd_fetch_data)
+
     b = sub.add_parser("build-data", help="ingest, filter, dedup, split, train tokenizer, pack tokens")
     b.add_argument("--sources", nargs="+", default=[SEED_CORPUS])
     b.add_argument("--synthetic", type=int, default=600)
     b.add_argument("--vocab-size", type=int, default=2048)
     b.add_argument("--val-fraction", type=float, default=0.1)
+    b.add_argument("--test-fraction", type=float, default=0.1)
+    b.add_argument("--cluster-threshold", type=float, default=0.5, help="MinHash Jaccard above which documents share a split")
     b.add_argument("--seed", type=int, default=0)
     b.add_argument("--out", default="runs/data")
     b.set_defaults(fn=cmd_build_data)
@@ -172,6 +216,9 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--lr", type=float, default=3e-3)
     t.add_argument("--eval-every", type=int, default=100)
     t.add_argument("--seed", type=int, default=0)
+    t.add_argument("--device", default="auto", help="auto | cpu | cuda | cuda:N")
+    t.add_argument("--precision", default="auto", help="auto | bf16 | fp32")
+    t.add_argument("--grad-accum", type=int, default=1)
     t.add_argument("--out", default="runs/nano-dense")
     t.set_defaults(fn=cmd_train)
 

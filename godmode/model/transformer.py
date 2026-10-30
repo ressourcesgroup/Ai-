@@ -239,26 +239,38 @@ class GodmodeLM(nn.Module):
     @torch.no_grad()
     def generate(self, idx: torch.Tensor, max_new_tokens: int, temperature: float = 1.0, top_k: int | None = None,
                  stop_ids: set[int] | None = None, generator: torch.Generator | None = None) -> torch.Tensor:
-        """Autoregressive sampling with a KV cache. temperature == 0 means greedy."""
+        """Autoregressive sampling with a KV cache. temperature == 0 means greedy.
+
+        Prompts longer than the context keep their last tokens. With a batch,
+        each row stops at its first stop id (later positions repeat it) and the
+        loop ends when every row has stopped. Restores the previous train/eval mode.
+        """
+        was_training = self.training
         self.eval()
+        idx = idx[:, -(self.cfg.max_seq_len - 1):]
         max_new_tokens = min(max_new_tokens, self.cfg.max_seq_len - idx.shape[1])
-        out = self(idx, use_cache=True)
-        cache = out.cache
-        logits = out.logits[:, -1]
-        for _ in range(max_new_tokens):
-            if temperature == 0:
-                nxt = logits.argmax(-1, keepdim=True)
-            else:
-                logits = logits / temperature
-                if top_k:
-                    kth = logits.topk(min(top_k, logits.size(-1))).values[:, -1, None]
-                    logits = logits.masked_fill(logits < kth, float("-inf"))
-                nxt = torch.multinomial(logits.softmax(-1), 1, generator=generator)
-            idx = torch.cat([idx, nxt], dim=1)
-            if stop_ids and nxt.item() in stop_ids:
-                break
-            if idx.shape[1] >= self.cfg.max_seq_len:
-                break
-            out = self(nxt, cache=cache)
+        stop = torch.tensor(sorted(stop_ids or ()), dtype=idx.dtype, device=idx.device)
+        done = torch.zeros(idx.shape[0], dtype=torch.bool, device=idx.device)
+        try:
+            out = self(idx, use_cache=True)
             cache, logits = out.cache, out.logits[:, -1]
+            for step in range(max_new_tokens):
+                if temperature == 0:
+                    nxt = logits.argmax(-1, keepdim=True)
+                else:
+                    logits = logits / temperature
+                    if top_k:
+                        kth = logits.topk(min(top_k, logits.size(-1))).values[:, -1, None]
+                        logits = logits.masked_fill(logits < kth, float("-inf"))
+                    nxt = torch.multinomial(logits.softmax(-1), 1, generator=generator)
+                if stop.numel():
+                    nxt = torch.where(done[:, None], idx[:, -1:], nxt)
+                    done |= torch.isin(nxt[:, 0], stop)
+                idx = torch.cat([idx, nxt], dim=1)
+                if (stop.numel() and bool(done.all())) or step == max_new_tokens - 1:
+                    break
+                out = self(nxt, cache=cache)
+                cache, logits = out.cache, out.logits[:, -1]
+        finally:
+            self.train(was_training)
         return idx
