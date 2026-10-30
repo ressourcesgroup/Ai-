@@ -46,8 +46,12 @@ def cmd_build_data(args) -> None:
     from .data import build_corpus, generate, load_source_dir, ngram_overlap, pack, split_clustered, write_manifest
     from .tokenizer import BPETokenizer
 
+    sources = args.sources or [SEED_CORPUS] + [
+        d for d, _, files in EXTERNAL_SOURCES.values() if all((Path(d) / f).exists() for f in files)
+    ]
+    print(f"sources: {sources}")
     docs = []
-    for d in args.sources:
+    for d in sources:
         docs += load_source_dir(d)
     samples, rejected = generate(args.synthetic, seed=args.seed)
     docs += [s.to_document() for s in samples]
@@ -197,7 +201,7 @@ def main(argv: list[str] | None = None) -> None:
     f.set_defaults(fn=cmd_fetch_data)
 
     b = sub.add_parser("build-data", help="ingest, filter, dedup, split, train tokenizer, pack tokens")
-    b.add_argument("--sources", nargs="+", default=[SEED_CORPUS])
+    b.add_argument("--sources", nargs="+", default=None, help="default: seed corpus + every fetched external dataset")
     b.add_argument("--synthetic", type=int, default=600)
     b.add_argument("--vocab-size", type=int, default=2048)
     b.add_argument("--val-fraction", type=float, default=0.1)
