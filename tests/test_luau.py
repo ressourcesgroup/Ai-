@@ -41,6 +41,44 @@ def test_seed_corpus_is_structurally_valid_and_lint_clean(path):
         "for i = 1, 10 do\n\twhile true do\n\t\tbreak\n\tend\nend",
         "repeat\n\tx += 1\nuntil x > 3",
         "return if a then function() end else nil",
+        # Nested if-expressions (else-if / then-if chains).
+        "local x = if a then 1 else if b then 2 else 3",
+        "local x = if a then if b then 1 else 2 else 3",
+        "local x = if a then b elseif c then d else if e then f else g",
+        "local f = if a then function() if x then y() end end else nil",
+        # A statement-level `if` right after a return type on the same line.
+        "local function f(): number? if x then return 1 end return nil end",
+        "local function f(): Map<K, V> if x then end end",
+        "function M.Get<T>(self: M, key: string): T? if key then end return nil end",
+        "local function f(cb: (number) -> ()?): ((number) -> ()) | nil if cb then end return nil end",
+        "local x: number? = nil if x then end",
+        "type T = number? if x then end",
+        "local v = if a > b then a else b",
+        "while if a then b else c do end",
+        # Strings: \z continuation, braces/backticks inside interpolations, escapes.
+        'local s = "a\\z\n   b"',
+        'local s = `{t["{"]}`',
+        "local s = `a \\{ \\` {x}`",
+        "local s = `x {`in {y}`} z`",
+        # Assorted valid Luau syntax.
+        "type F = (number) -> string",
+        "export type T<U> = {[string]: U}",
+        "type G = <T>(T) -> T",
+        "export type Fn = (a: number, b: string) -> boolean",
+        "function f<T>(x: T): T return x end",
+        'local s = ("x"):rep(3)',
+        "local s = ''\ns ..= 'a'\nlocal n = 7\nn //= 2",
+        "for i = 1, 3 do\n\tif i == 2 then continue end\nend",
+        "@native function f() end",
+        "@checked function f(x: number): number return x end",
+        "local s = [==[ a ]] ]==] --[=[ c ]] ]=]",
+        "local n = 0b1010 + 1_000_000 + .5 + 0xFF",
+        "local x = 1\nlocal y: typeof(x) = x",
+        'type Mode = "a" | "b"\nlocal m: Mode = "a"',
+        "local t = { a = if x then 1 else 2, b = 3 }",
+        'local p = Instance.new("Part")\n\t:Clone()\n\t:Destroy()',
+        "local function f(...: number): ...number return ... end",
+        "for k: string, v: number in pairs(t) do if v then end end",
     ],
 )
 def test_valid_programs_pass(src):
@@ -57,6 +95,13 @@ def test_valid_programs_pass(src):
         "for i = 1, 3\n\tprint(i)\nend",
         'local s = "unterminated',
         "else\nend",
+        "local x = if a then 1 else if b then 2",
+        "local x = if a then 1",
+        "local function f(): number? if x then return 1 end",
+        'local s = "a\nb"',
+        "local s = `a\nb`",
+        "local s = `{x`",
+        "local s = `a{{b}}`",
     ],
 )
 def test_broken_programs_fail(src):
@@ -93,3 +138,74 @@ def test_lint_datastore_pcall_and_wrappers():
         "retry(function() return store:SetAsync(k, v) end)"
     )
     assert "GM007" not in rules(wrapped)
+
+
+GM002_FLAGGED = [
+    # Named handler defined in the same file (local function and local = function).
+    "local function onEmote(player, emote)\n\tprint(emote)\nend\nremote.OnServerEvent:Connect(onEmote)",
+    "local onEmote = function(player, emote)\n\tprint(emote)\nend\nremote.OnServerEvent:Connect(onEmote)",
+    "function remote.OnServerInvoke(p, x)\n\treturn shop[x]\nend",
+    "remote.OnServerEvent:Connect(function(player, ...)\n\tdoThing(...)\nend)",
+    "remote.OnServerEvent:Connect(function(player, ...)\n\tlocal a = ...\n\tcoins.Value += a\nend)",
+    # A validator name elsewhere in the body does not validate the argument.
+    "remote.OnServerEvent:Connect(function(player, amount)\n\tprint(tostring(amount))\n\tcoins.Value += amount\nend)",
+    "remote.OnServerEvent:Connect(function(player, a, b)\n\tif typeof(a) ~= 'number' then return end\n\tcoins.Value += a + b\nend)",
+    "remote.OnServerEvent:Connect(function(player, item)\n\tlocal price = PRICES[item]\n\tcoins.Value -= price\nend)",
+]
+
+GM002_CLEAN = [
+    "local function onEmote(player, emote)\n\tif typeof(emote) ~= 'string' then return end\nend\nremote.OnServerEvent:Connect(onEmote)",
+    "function remote.OnServerInvoke(p, x)\n\tif type(x) ~= 'string' then return end\n\treturn shop[x]\nend",
+    "remote.OnServerEvent:Connect(function(player, ...)\n\tlocal a = ...\n\tif typeof(a) ~= 'number' then return end\nend)",
+    "remote.OnServerEvent:Connect(function(player, ...)\n\tif select('#', ...) ~= 1 then return end\nend)",
+    "remote.OnServerEvent:Connect(function(player, _a, unused)\n\tprint(player)\nend)",
+    "remote.OnServerEvent:Connect(function(player, item)\n\tif not ALLOWED[item] then return end\nend)",
+    "remote.OnServerEvent:Connect(function(player, item)\n\tlocal price = PRICES[item]\n\tif price == nil then return end\nend)",
+    "remote.OnServerEvent:Connect(function(player, part)\n\tif not part:IsA('BasePart') then return end\nend)",
+    "remote.OnServerEvent:Connect(function(player, n)\n\tlocal v = tonumber(n)\nend)",
+    "local function valid(x) return typeof(x) == 'number' end\n"
+    "remote.OnServerEvent:Connect(function(player, n)\n\tif not valid(n) then return end\nend)",
+]
+
+
+@pytest.mark.parametrize("src", GM002_FLAGGED)
+def test_gm002_flags_unvalidated_handlers(src):
+    assert "GM002" in rules(src)
+
+
+@pytest.mark.parametrize("src", GM002_CLEAN)
+def test_gm002_accepts_validated_handlers(src):
+    assert "GM002" not in rules(src)
+
+
+def test_gm002_names_the_unvalidated_parameter():
+    src = "remote.OnServerEvent:Connect(function(player, a, b)\n\tif typeof(a) ~= 'number' then return end\n\tx = a + b\nend)"
+    (finding,) = lint(src)
+    assert "'b'" in finding.message and "'a'" not in finding.message
+
+
+def test_gm007_scoping():
+    long_pcall = "local ok, v = pcall(function()\n" + "\tlocal a = 1\n" * 6 + "\treturn store:GetAsync(key)\nend)"
+    assert "GM007" not in rules(long_pcall)
+    assert "GM007" in rules("local x = pcall(print)\nlocal v = store:GetAsync(key)")
+    assert "GM007" in rules("local function f()\n\tpcall(print)\nend\nlocal v = store:GetAsync(key)")
+    protector_body = "local function load(k)\n\tlocal ok, v = pcall(fn)\n\treturn store:GetAsync(k)\nend"
+    assert "GM007" not in rules(protector_body)
+
+
+def test_gm006_skips_locally_bound_names():
+    assert "GM006" not in rules("local function wait(t) end\nwait(1)")
+    assert "GM006" not in rules("local wait = require(x)\nwait(1)")
+    assert "GM006" in rules("spawn(f)")
+
+
+def test_gm001_global_loadstring_and_environment_indexing():
+    assert "GM001" not in rules("obj:loadstring(x)\nobj.loadstring(x)")
+    assert "GM001" in rules('getfenv()["load".."string"](x)')
+    assert "GM001" in rules("getfenv().loadstring(x)")
+    assert "GM001" in rules("local f = loadstring\nf(x)()")
+
+
+def test_lexer_line_numbers_after_multiline_strings():
+    toks = tokenize('local s = "a\\z\n  b"\nlocal t = [[\n]]\nx')
+    assert toks[-2].value == "x" and toks[-2].line == 5
