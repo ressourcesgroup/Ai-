@@ -1,0 +1,3088 @@
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
+  <Item class="Script" referent="RBX9FE3BA2F986A0489988264925B98C819">
+    <Properties>
+      <string name="Name">GodmodePlugin</string>
+      <bool name="Disabled">false</bool>
+      <ProtectedString name="Source"><![CDATA[--!strict
+-- GODMODE Studio plugin entry point (packaged as the Script "GodmodePlugin";
+-- every other module is a ModuleScript child of it).
+--
+-- Flow: user message -> POST /chat (with selection / open-script context and the
+-- autonomy level) -> reply bubble + one ActionPreview card per proposed action ->
+-- user clicks Apply -> ActionApplier applies it as one undo step -> the real
+-- outcome (success or the exact error) is reported in the chat.
+-- The server only proposes; only this plugin changes the place, and only on a click.
+
+local ActionApplier = require(script.ActionApplier)
+local ActionPreview = require(script.ActionPreview)
+local ChatUI = require(script.ChatUI)
+local Context = require(script.Context)
+local HttpClient = require(script.HttpClient)
+local Theme = require(script.Theme)
+local Ui = require(script.Ui)
+
+local PROTOCOL_VERSION = 1
+local DEFAULT_URL = "http://127.0.0.1:8765"
+local DEFAULT_AUTONOMY = 2
+local HEALTH_INTERVAL = 30
+local MAX_HISTORY = 20
+local MAX_MESSAGE_CHARS = 8000
+
+local SETTING_URL = "GodmodeServerUrl"
+local SETTING_TOKEN = "GodmodeToken"
+local SETTING_AUTONOMY = "GodmodeAutonomy"
+
+local thisPlugin: Plugin = plugin
+
+---------------------------------------------------------------------------
+-- Settings (persisted per user with plugin:SetSetting)
+---------------------------------------------------------------------------
+
+local function readSetting(key: string): any
+	local ok, value = pcall(function()
+		return thisPlugin:GetSetting(key)
+	end)
+	return if ok then value else nil
+end
+
+local function writeSetting(key: string, value: any)
+	pcall(function()
+		thisPlugin:SetSetting(key, value)
+	end)
+end
+
+local serverUrl: string = DEFAULT_URL
+local storedUrl = readSetting(SETTING_URL)
+if typeof(storedUrl) == "string" and storedUrl ~= "" then
+	serverUrl = storedUrl
+end
+
+local token: string = ""
+local storedToken = readSetting(SETTING_TOKEN)
+if typeof(storedToken) == "string" then
+	token = storedToken
+end
+
+local autonomy: number = DEFAULT_AUTONOMY
+local storedAutonomy = readSetting(SETTING_AUTONOMY)
+if typeof(storedAutonomy) == "number" and storedAutonomy >= 1 and storedAutonomy <= 5 then
+	autonomy = math.floor(storedAutonomy)
+end
+
+local client = HttpClient.new(serverUrl, token)
+
+---------------------------------------------------------------------------
+-- Toolbar button + dock widget
+---------------------------------------------------------------------------
+
+local toolbar = thisPlugin:CreateToolbar("GODMODE")
+local toggleButton = toolbar:CreateButton("GODMODE", "Open the GODMODE assistant", "", "GODMODE")
+toggleButton.ClickableWhenViewportHidden = true
+
+local widgetInfo = DockWidgetPluginGuiInfo.new(
+	Enum.InitialDockState.Right,
+	false, -- initially enabled
+	false, -- override saved enabled state
+	380, -- default width
+	560, -- default height
+	300, -- minimum width
+	300 -- minimum height
+)
+local widget = thisPlugin:CreateDockWidgetPluginGui("GodmodeAssistant", widgetInfo)
+widget.Title = "GODMODE"
+widget.Name = "GodmodeAssistant"
+widget.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+toggleButton:SetActive(widget.Enabled)
+toggleButton.Click:Connect(function()
+	widget.Enabled = not widget.Enabled
+end)
+
+---------------------------------------------------------------------------
+-- Chat state
+---------------------------------------------------------------------------
+
+type HistoryEntry = { role: string, content: string }
+local history: { HistoryEntry } = {}
+local serverCompatible = true
+local ui: ChatUI.ChatUI
+
+local function pushHistory(role: string, content: string)
+	table.insert(history, { role = role, content = content })
+	while #history > MAX_HISTORY do
+		table.remove(history, 1)
+	end
+end
+
+local function isLocalUrl(url: string): boolean
+	local host = url:match("^https?://([^/:]+)")
+	return host == "127.0.0.1" or host == "localhost" or host == "[::1]"
+end
+
+local function checkHealth()
+	ui:setStatus("checking")
+	local response = client:get("/health")
+	if not response.ok then
+		serverCompatible = true -- unknown; let /chat report its own error
+		ui:setStatus("disconnected")
+		return response.error
+	end
+	local body = response.body
+	local protocol = if typeof(body) == "table" then body.protocol_version else nil
+	if typeof(protocol) == "number" and protocol > PROTOCOL_VERSION then
+		serverCompatible = false
+		ui:setStatus("disconnected", "Protocol v" .. tostring(protocol))
+		return "The server speaks protocol v" .. tostring(protocol)
+			.. " but this plugin only understands v" .. tostring(PROTOCOL_VERSION) .. ". Update the plugin."
+	end
+	serverCompatible = true
+	-- The status label is narrow; the model state is only a short suffix.
+	local online = "Online"
+	if typeof(body.model) == "table" and body.model.loaded == true then
+		online = "Online + model"
+	end
+	ui:setStatus("connected", online)
+	return nil
+end
+
+local function verifySource(source: string): (boolean, string)
+	local response = client:post("/verify", { source = source })
+	if not response.ok then
+		return false, "Verification request failed: " .. tostring(response.error)
+	end
+	local body = response.body
+	local lines: { string } = {}
+	if typeof(body.verification) == "table" then
+		for _, entry in ipairs(body.verification) do
+			if typeof(entry) == "table" then
+				table.insert(lines, (if entry.ok == true then "PASS " else "FAIL ") .. tostring(entry.check)
+					.. (if typeof(entry.detail) == "string" then " - " .. entry.detail else ""))
+			end
+		end
+	end
+	if typeof(body.lint) == "table" then
+		for _, finding in ipairs(body.lint) do
+			if typeof(finding) == "table" then
+				table.insert(lines, string.format("  %s %s line %s: %s", tostring(finding.rule), tostring(finding.severity),
+					tostring(finding.line), tostring(finding.message)))
+			end
+		end
+	end
+	local passed = body.passed == true
+	return passed, (if passed then "Verifier (/verify): passed" else "Verifier (/verify): not passed")
+		.. (if #lines > 0 then "\n" .. table.concat(lines, "\n") else "")
+end
+
+local function reportResult(action: any, result: ActionApplier.Result)
+	local label = tostring(action.type) .. " " .. ActionApplier.targetPath(action)
+	if result.ok then
+		ui:addNotice("success", "Applied " .. label .. ": " .. result.message)
+	else
+		ui:addNotice("error", "Did NOT apply " .. label .. ": " .. result.message)
+	end
+end
+
+local function summariseVerification(verification: { any })
+	if #verification == 0 then
+		return
+	end
+	local passed = 0
+	local failures: { string } = {}
+	for _, entry in ipairs(verification) do
+		if typeof(entry) == "table" then
+			if entry.ok == true then
+				passed += 1
+			else
+				table.insert(failures, tostring(entry.check) .. (if typeof(entry.detail) == "string" then ": " .. entry.detail else ""))
+			end
+		end
+	end
+	local text = "Server verification: " .. tostring(passed) .. "/" .. tostring(#verification) .. " checks passed"
+	if #failures > 0 then
+		ui:addNotice("warning", text .. "\n" .. table.concat(failures, "\n"))
+	else
+		ui:addNotice("info", text .. " (structural check + lint; heuristic, not a compile)")
+	end
+end
+
+local function showActions(actions: { any }, verification: { any })
+	local cards: { ActionPreview.Card } = {}
+	for _, action in ipairs(actions) do
+		local card = ActionPreview.new(action, {
+			verification = verification,
+			onApply = ActionApplier.apply,
+			onVerify = verifySource,
+			onResult = reportResult,
+		})
+		ui:append(card.frame)
+		table.insert(cards, card)
+	end
+
+	-- Autonomy 4-5: the server marks safe actions requires_approval=false; the
+	-- protocol allows applying those together after ONE confirmation click.
+	local batchable = 0
+	for _, card in ipairs(cards) do
+		if card:isBatchable() then
+			batchable += 1
+		end
+	end
+	if autonomy >= 4 and batchable > 0 then
+		local row = Ui.create("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 0, 26),
+		}, { Ui.hlist(6) }) :: Frame
+		local applyAll = Ui.button("Apply " .. tostring(batchable) .. " safe action(s) in order", "primary", 240)
+		applyAll.Parent = row
+		ui:append(row)
+		applyAll.MouseButton1Click:Connect(function()
+			applyAll:Destroy()
+			local applied, failed = 0, false
+			for _, card in ipairs(cards) do
+				if card:isBatchable() then
+					local result = card:apply()
+					if result and result.ok then
+						applied += 1
+					elseif result then
+						failed = true
+						break
+					end
+				end
+			end
+			if failed then
+				ui:addNotice("error", "Batch stopped after a failure: " .. tostring(applied)
+					.. " action(s) applied, the rest were NOT applied (they may depend on the failed one).")
+			else
+				ui:addNotice("success", "Batch finished: " .. tostring(applied) .. " action(s) applied. Destructive actions (if any) still need their own confirmation.")
+			end
+		end)
+	end
+end
+
+local function sendMessage(text: string)
+	if #text > MAX_MESSAGE_CHARS then
+		ui:addNotice("error", "Message is too long (" .. tostring(#text) .. " characters; the limit is " .. tostring(MAX_MESSAGE_CHARS) .. ").")
+		return
+	end
+	if not serverCompatible then
+		ui:addNotice("error", "This plugin is too old for the connected server's protocol version. Update the plugin.")
+		return
+	end
+	ui:addUserMessage(text)
+	ui:setBusy(true)
+	local historySnapshot = table.clone(history)
+	pushHistory("user", text)
+
+	task.spawn(function()
+		local payload = {
+			message = text,
+			history = historySnapshot,
+			context = Context.collect(),
+			autonomy = autonomy,
+		}
+		local response = client:post("/chat", payload)
+		ui:setBusy(false)
+		if not response.ok then
+			ui:setStatus("disconnected")
+			ui:addNotice("error", "Request failed: " .. tostring(response.error))
+			return
+		end
+		ui:setStatus("connected")
+		local body = response.body
+		local reply = if typeof(body.reply_markdown) == "string" then body.reply_markdown else "(empty reply)"
+		ui:addAssistantMessage(reply)
+		pushHistory("assistant", reply)
+		if typeof(body.source) == "string" then
+			ui:addNotice("info", "Source: " .. body.source)
+		end
+		if typeof(body.warnings) == "table" then
+			for _, warning in ipairs(body.warnings) do
+				ui:addNotice("warning", "Warning: " .. tostring(warning))
+			end
+		end
+		local verification = if typeof(body.verification) == "table" then body.verification else {}
+		summariseVerification(verification)
+		local actions = if typeof(body.actions) == "table" then body.actions else {}
+		if #actions > 0 then
+			showActions(actions, verification)
+		end
+	end)
+end
+
+ui = ChatUI.new(widget, {
+	onSend = sendMessage,
+	onAutonomyChanged = function(level: number)
+		autonomy = level
+		writeSetting(SETTING_AUTONOMY, level)
+		ui:addNotice("info", "Autonomy set to " .. tostring(level) .. " - " .. ChatUI.AUTONOMY_LABELS[level] .. ": " .. ChatUI.AUTONOMY_HINTS[level])
+	end,
+	onSaveSettings = function(url: string, newToken: string)
+		serverUrl = HttpClient.normaliseUrl(if url ~= "" then url else DEFAULT_URL)
+		token = newToken:match("^%s*(.-)%s*$") or ""
+		writeSetting(SETTING_URL, serverUrl)
+		writeSetting(SETTING_TOKEN, token)
+		client = HttpClient.new(serverUrl, token)
+		if not isLocalUrl(serverUrl) then
+			ui:addNotice("warning", "The server URL is not on this computer (" .. serverUrl .. "). Your messages, open script and token will be sent there.")
+		end
+		task.spawn(function()
+			local err = checkHealth()
+			if err then
+				ui:addNotice("error", err)
+			else
+				ui:addNotice("success", "Connected to " .. serverUrl)
+			end
+		end)
+	end,
+	onRefreshStatus = function()
+		task.spawn(function()
+			local err = checkHealth()
+			if err then
+				ui:addNotice("error", err)
+			end
+		end)
+	end,
+	onClear = function()
+		ui:clear()
+		table.clear(history)
+	end,
+}, { url = serverUrl, token = token, autonomy = autonomy })
+
+ui:addNotice("info", "GODMODE proposes changes; nothing in your place changes until you click Apply. "
+	.. "Every applied action is one undo step (Ctrl+Z).")
+
+---------------------------------------------------------------------------
+-- Lifecycle: health polling while the widget is open
+---------------------------------------------------------------------------
+
+local running = true
+local lastHealth = 0
+
+local function onEnabledChanged()
+	toggleButton:SetActive(widget.Enabled)
+	if widget.Enabled then
+		lastHealth = os.clock()
+		task.spawn(function()
+			local err = checkHealth()
+			if err then
+				ui:addNotice("error", err)
+			end
+		end)
+	end
+end
+
+widget:GetPropertyChangedSignal("Enabled"):Connect(onEnabledChanged)
+if widget.Enabled then
+	onEnabledChanged()
+end
+
+task.spawn(function()
+	while running do
+		task.wait(5)
+		if running and widget.Enabled and os.clock() - lastHealth >= HEALTH_INTERVAL then
+			lastHealth = os.clock()
+			checkHealth()
+		end
+	end
+end)
+
+thisPlugin.Unloading:Connect(function()
+	running = false
+	Theme.destroy()
+end)
+]]></ProtectedString>
+    </Properties>
+    <Item class="ModuleScript" referent="RBXB51BC9B3C2E2D24960A8A16F68A975AA">
+      <Properties>
+        <string name="Name">ActionApplier</string>
+        <ProtectedString name="Source"><![CDATA[--!strict
+-- ActionApplier: applies the declarative actions from docs/PLUGIN_PROTOCOL.md.
+--
+-- * Each action is applied inside ChangeHistoryService:TryBeginRecording /
+--   FinishRecording, so it is exactly one undo step. Success => Commit;
+--   any error => Cancel (Studio reverts everything done during the recording).
+-- * Nothing received from the server is ever executed. Scripts are created with
+--   their source as plain text; instances are built from a fixed allow-list of
+--   value types (PropertyDecoder); paths are limited to normal game services
+--   (PathResolver).
+-- * Every call returns a Result describing exactly what happened. Callers must
+--   report `ok = false` results as failures, never as success.
+
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
+local CollectionService = game:GetService("CollectionService")
+local Selection = game:GetService("Selection")
+
+local PathResolver = require(script.Parent.PathResolver)
+local PropertyDecoder = require(script.Parent.PropertyDecoder)
+
+local ActionApplier = {}
+
+export type Result = {
+	ok: boolean,
+	message: string,
+	created: Instance?,
+	previewId: string?,
+}
+
+ActionApplier.SUPPORTED_ACTIONS = {
+	"create_script",
+	"edit_script",
+	"create_instances",
+	"create_animation",
+	"delete_instance",
+}
+
+local SCRIPT_CLASSES = { Script = true, LocalScript = true, ModuleScript = true } :: { [string]: boolean }
+local EASING_STYLES = {
+	Linear = true,
+	Constant = true,
+	Cubic = true,
+	Elastic = true,
+	Bounce = true,
+	CubicV2 = true,
+} :: { [string]: boolean }
+local EASING_DIRECTIONS = { In = true, Out = true, InOut = true } :: { [string]: boolean }
+local ANIMATION_ROOT = "HumanoidRootPart"
+local DEFAULT_ANIMATION_PARENT = "ServerStorage.GodmodeAnimations"
+local MAX_TREE_NODES = 5000
+local MAX_TREE_DEPTH = 50
+local MAX_SOURCE_LENGTH = 1000000
+
+-- Properties set first / last when building instances. JSONDecode does not keep
+-- object key order, so the protocol's "Size before CFrame" rule is enforced here.
+local FIRST_PROPERTIES = { "Shape", "Size" }
+local LAST_PROPERTIES = { "CFrame", "Position", "Orientation", "Rotation", "PivotOffset" }
+
+local function fail(message: string): Result
+	return { ok = false, message = message, created = nil, previewId = nil }
+end
+
+local function succeed(message: string, created: Instance?, previewId: string?): Result
+	return { ok = true, message = message, created = created, previewId = previewId }
+end
+
+-- Destructive actions always require an explicit confirmation in the UI.
+function ActionApplier.isDestructive(action: any): boolean
+	return typeof(action) == "table" and (action.type == "delete_instance" or action.destructive == true)
+end
+
+-- Best-effort target path for display.
+function ActionApplier.targetPath(action: any): string
+	if typeof(action) ~= "table" then
+		return "?"
+	end
+	if typeof(action.path) == "string" then
+		return action.path
+	end
+	local parentPath = action.parent_path
+	if action.type == "create_animation" and parentPath == nil then
+		parentPath = DEFAULT_ANIMATION_PARENT
+	end
+	local name = action.name
+	if action.type == "create_instances" and typeof(action.tree) == "table" then
+		name = action.tree.name
+	end
+	if typeof(parentPath) == "string" and typeof(name) == "string" then
+		return parentPath .. "." .. name
+	end
+	if typeof(parentPath) == "string" then
+		return parentPath
+	end
+	return "?"
+end
+
+---------------------------------------------------------------------------
+-- Script source helpers
+---------------------------------------------------------------------------
+
+local function readSource(container: LuaSourceContainer): string
+	local ok, source = pcall(function()
+		return game:GetService("ScriptEditorService"):GetEditorSource(container)
+	end)
+	if ok and typeof(source) == "string" then
+		return source
+	end
+	return (container :: any).Source
+end
+
+-- Write source through ScriptEditorService when available (keeps open editor
+-- tabs in sync), falling back to the Source property. Returns an error or nil.
+local function writeSource(container: LuaSourceContainer, source: string): string?
+	local editorOk, editorErr = pcall(function()
+		local ScriptEditorService = game:GetService("ScriptEditorService")
+		ScriptEditorService:UpdateSourceAsync(container, function(_old: string): string
+			return source
+		end)
+	end)
+	if not editorOk then
+		local propertyOk, propertyErr = pcall(function()
+			(container :: any).Source = source
+		end)
+		if not propertyOk then
+			return "could not set source (ScriptEditorService: " .. tostring(editorErr) .. "; Source: " .. tostring(propertyErr) .. ")"
+		end
+	end
+	if readSource(container) ~= source then
+		return "source did not update (the script may be locked by Team Create or another editor)"
+	end
+	return nil
+end
+
+local function checkSource(source: any): string?
+	if typeof(source) ~= "string" then
+		return "source must be a string"
+	end
+	if #source > MAX_SOURCE_LENGTH then
+		return "source is too large"
+	end
+	return nil
+end
+
+---------------------------------------------------------------------------
+-- Handlers. Each returns a Result; errors raised inside are caught by apply().
+---------------------------------------------------------------------------
+
+local function createScript(action: any): Result
+	local className = action.class
+	if typeof(className) ~= "string" or not SCRIPT_CLASSES[className] then
+		return fail("class must be Script, LocalScript or ModuleScript (got " .. tostring(className) .. ")")
+	end
+	local okName, nameErr = PathResolver.validName(action.name)
+	if not okName then
+		return fail(nameErr :: string)
+	end
+	local sourceErr = checkSource(action.source)
+	if sourceErr then
+		return fail(sourceErr)
+	end
+	local parent, err = PathResolver.resolve(action.parent_path)
+	if parent == nil then
+		return fail("parent_path: " .. tostring(err))
+	end
+
+	local name = PathResolver.uniqueName(parent, action.name)
+	local container = Instance.new(className) :: LuaSourceContainer
+	container.Name = name
+	container.Parent = parent
+	local writeErr = writeSource(container, action.source)
+	if writeErr then
+		container:Destroy()
+		return fail(writeErr)
+	end
+	local note = if name ~= action.name then " (renamed: '" .. action.name .. "' already existed)" else ""
+	return succeed(
+		"created " .. className .. " " .. (PathResolver.pathOf(container) or name) .. note,
+		container
+	)
+end
+
+local function editScript(action: any): Result
+	local sourceErr = checkSource(action.new_source)
+	if sourceErr then
+		return fail("new_source: " .. sourceErr)
+	end
+	local target, err = PathResolver.resolve(action.path)
+	if target == nil then
+		return fail("path: " .. tostring(err))
+	end
+	if not SCRIPT_CLASSES[target.ClassName] then
+		return fail(tostring(action.path) .. " is a " .. target.ClassName .. ", not a script")
+	end
+	local container = target :: LuaSourceContainer
+	local writeErr = writeSource(container, action.new_source)
+	if writeErr then
+		return fail(writeErr)
+	end
+	return succeed("replaced the source of " .. tostring(action.path), container)
+end
+
+local function orderedPropertyNames(properties: { [string]: any }): { string }
+	local first: { string } = {}
+	local middle: { string } = {}
+	local last: { string } = {}
+	for _, name in ipairs(FIRST_PROPERTIES) do
+		if properties[name] ~= nil then
+			table.insert(first, name)
+		end
+	end
+	for name in pairs(properties) do
+		if typeof(name) == "string" and not table.find(FIRST_PROPERTIES, name) and not table.find(LAST_PROPERTIES, name) then
+			table.insert(middle, name)
+		end
+	end
+	table.sort(middle)
+	for _, name in ipairs(LAST_PROPERTIES) do
+		if properties[name] ~= nil then
+			table.insert(last, name)
+		end
+	end
+	local ordered = first
+	for _, name in ipairs(middle) do
+		table.insert(ordered, name)
+	end
+	for _, name in ipairs(last) do
+		table.insert(ordered, name)
+	end
+	return ordered
+end
+
+type BuildState = { count: number }
+
+-- Build an unparented instance tree. Returns the root or an error.
+local function buildNode(node: any, depth: number, state: BuildState, path: string): (Instance?, string?)
+	if typeof(node) ~= "table" then
+		return nil, path .. ": node must be an object"
+	end
+	if depth > MAX_TREE_DEPTH then
+		return nil, path .. ": tree is deeper than " .. tostring(MAX_TREE_DEPTH)
+	end
+	state.count += 1
+	if state.count > MAX_TREE_NODES then
+		return nil, "tree has more than " .. tostring(MAX_TREE_NODES) .. " nodes"
+	end
+	if typeof(node.className) ~= "string" then
+		return nil, path .. ": className is required"
+	end
+	local okName, nameErr = PathResolver.validName(node.name)
+	if not okName then
+		return nil, path .. ": " .. tostring(nameErr)
+	end
+	local nodePath = path .. "." .. node.name
+
+	local created, instanceOrErr = pcall(function()
+		return Instance.new(node.className)
+	end)
+	if not created then
+		return nil, nodePath .. ": cannot create class '" .. node.className .. "' (" .. tostring(instanceOrErr) .. ")"
+	end
+	local instance = instanceOrErr :: Instance
+	instance.Name = node.name
+
+	local function abort(message: string): (Instance?, string?)
+		instance:Destroy()
+		return nil, message
+	end
+
+	if node.properties ~= nil then
+		if typeof(node.properties) ~= "table" then
+			return abort(nodePath .. ": properties must be an object")
+		end
+		for _, property in ipairs(orderedPropertyNames(node.properties)) do
+			local propErr = PropertyDecoder.apply(instance, property, node.properties[property])
+			if propErr then
+				return abort(nodePath .. ": " .. propErr)
+			end
+		end
+	end
+
+	if node.attributes ~= nil then
+		if typeof(node.attributes) ~= "table" then
+			return abort(nodePath .. ": attributes must be an object")
+		end
+		for attrName, attrValue in pairs(node.attributes) do
+			local attrErr = PropertyDecoder.applyAttribute(instance, attrName, attrValue)
+			if attrErr then
+				return abort(nodePath .. ": " .. attrErr)
+			end
+		end
+	end
+
+	if node.tags ~= nil then
+		if typeof(node.tags) ~= "table" then
+			return abort(nodePath .. ": tags must be an array of strings")
+		end
+		for _, tag in ipairs(node.tags) do
+			if typeof(tag) ~= "string" or tag == "" then
+				return abort(nodePath .. ": tags must be non-empty strings")
+			end
+			CollectionService:AddTag(instance, tag)
+		end
+	end
+
+	if node.children ~= nil then
+		if typeof(node.children) ~= "table" then
+			return abort(nodePath .. ": children must be an array")
+		end
+		for _, childNode in ipairs(node.children) do
+			local child, childErr = buildNode(childNode, depth + 1, state, nodePath)
+			if child == nil then
+				return abort(tostring(childErr))
+			end
+			child.Parent = instance
+		end
+	end
+
+	return instance, nil
+end
+
+local function createInstances(action: any): Result
+	local parent, err = PathResolver.resolve(action.parent_path)
+	if parent == nil then
+		return fail("parent_path: " .. tostring(err))
+	end
+	local state: BuildState = { count = 0 }
+	local root, buildErr = buildNode(action.tree, 1, state, tostring(action.parent_path))
+	if root == nil then
+		return fail(tostring(buildErr))
+	end
+	local requested = root.Name
+	root.Name = PathResolver.uniqueName(parent, requested)
+	root.Parent = parent -- Parent is always set last.
+	local note = if root.Name ~= requested then " (renamed: '" .. requested .. "' already existed)" else ""
+	return succeed(
+		"created " .. root.ClassName .. " " .. (PathResolver.pathOf(root) or root.Name)
+			.. " with " .. tostring(state.count) .. " instance(s)" .. note,
+		root
+	)
+end
+
+---------------------------------------------------------------------------
+-- Animation
+---------------------------------------------------------------------------
+
+local function vector3Of(value: any, label: string): (Vector3?, string?)
+	if value == nil then
+		return Vector3.zero, nil
+	end
+	if typeof(value) ~= "table" or #value ~= 3 then
+		return nil, label .. " must be [x, y, z]"
+	end
+	for i = 1, 3 do
+		if typeof(value[i]) ~= "number" or value[i] ~= value[i] or math.abs(value[i]) > 1e6 then
+			return nil, label .. "[" .. tostring(i) .. "] is not a finite number"
+		end
+	end
+	return Vector3.new(value[1], value[2], value[3]), nil
+end
+
+-- Pose CFrame per protocol: CFrame.new(position) * CFrame.Angles(rad X, rad Y, rad Z)
+-- (X, then Y, then Z), in the joint's Motor6D space.
+local function poseCFrame(pose: any, label: string): (CFrame?, string?)
+	local rotation, rotErr = vector3Of(pose.rotation, label .. ".rotation")
+	if rotation == nil then
+		return nil, rotErr
+	end
+	local position, posErr = vector3Of(pose.position, label .. ".position")
+	if position == nil then
+		return nil, posErr
+	end
+	return CFrame.new(position.X, position.Y, position.Z)
+		* CFrame.Angles(math.rad(rotation.X), math.rad(rotation.Y), math.rad(rotation.Z)), nil
+end
+
+local function easingStyle(name: any, fallback: Enum.PoseEasingStyle): (Enum.PoseEasingStyle?, string?)
+	if name == nil then
+		return fallback, nil
+	end
+	if typeof(name) ~= "string" or not EASING_STYLES[name] then
+		return nil, "unsupported easing_style: " .. tostring(name)
+	end
+	return (Enum.PoseEasingStyle :: any)[name], nil
+end
+
+local function easingDirection(name: any, fallback: Enum.PoseEasingDirection): (Enum.PoseEasingDirection?, string?)
+	if name == nil then
+		return fallback, nil
+	end
+	if typeof(name) ~= "string" or not EASING_DIRECTIONS[name] then
+		return nil, "unsupported easing_direction: " .. tostring(name)
+	end
+	return (Enum.PoseEasingDirection :: any)[name], nil
+end
+
+-- A part is a hierarchy root when it has no parent entry. JSON `null` values vanish
+-- in JSONDecode, so `{"HumanoidRootPart": null}` and a missing key look the same;
+-- only HumanoidRootPart or a part that is itself used as a parent may be a root.
+local function isRootPart(part: string, hierarchy: { [string]: any }): boolean
+	if hierarchy[part] ~= nil then
+		return false
+	end
+	if part == ANIMATION_ROOT then
+		return true
+	end
+	for _, parentName in pairs(hierarchy) do
+		if parentName == part then
+			return true
+		end
+	end
+	return false
+end
+
+local function buildKeyframe(frame: any, index: number, hierarchy: { [string]: any }): (Keyframe?, string?)
+	local label = "keyframes[" .. tostring(index) .. "]"
+	if typeof(frame) ~= "table" then
+		return nil, label .. " must be an object"
+	end
+	if typeof(frame.time) ~= "number" or frame.time ~= frame.time or frame.time < 0 or frame.time > 3600 then
+		return nil, label .. ".time must be a number >= 0"
+	end
+	local defaultStyle, styleErr = easingStyle(frame.easing_style, Enum.PoseEasingStyle.Linear)
+	if defaultStyle == nil then
+		return nil, label .. ": " .. tostring(styleErr)
+	end
+	local defaultDirection, dirErr = easingDirection(frame.easing_direction, Enum.PoseEasingDirection.In)
+	if defaultDirection == nil then
+		return nil, label .. ": " .. tostring(dirErr)
+	end
+	if typeof(frame.poses) ~= "table" then
+		return nil, label .. ".poses must be an object"
+	end
+
+	local keyframe = Instance.new("Keyframe")
+	keyframe.Time = frame.time
+	keyframe.Name = if typeof(frame.name) == "string" and frame.name ~= "" then frame.name else "Keyframe"
+
+	local poses: { [string]: Pose } = {}
+
+	local function abort(message: string): (Keyframe?, string?)
+		keyframe:Destroy()
+		return nil, message
+	end
+
+	-- Create (or fetch) the Pose for `part`, creating its ancestors first.
+	local function ensurePose(part: string, depth: number): (Pose?, string?)
+		local existing = poses[part]
+		if existing then
+			return existing, nil
+		end
+		if depth > 64 then
+			return nil, "hierarchy has a cycle near '" .. part .. "'"
+		end
+		local okName, nameErr = PathResolver.validName(part)
+		if not okName then
+			return nil, "pose part: " .. tostring(nameErr)
+		end
+		local parentInstance: Instance
+		if isRootPart(part, hierarchy) then
+			parentInstance = keyframe
+		else
+			local parentPart = hierarchy[part]
+			if typeof(parentPart) ~= "string" then
+				return nil, "part '" .. part .. "' is not in the hierarchy map"
+			end
+			local parentPose, parentErr = ensurePose(parentPart, depth + 1)
+			if parentPose == nil then
+				return nil, parentErr
+			end
+			parentInstance = parentPose
+		end
+		local pose = Instance.new("Pose")
+		pose.Name = part -- R15 convention: Pose named after the part.
+		pose.CFrame = CFrame.identity
+		-- Structural (ancestor-only) poses carry no influence; posed parts get Weight = 1.
+		pose.Weight = 0
+		pose.EasingStyle = defaultStyle :: Enum.PoseEasingStyle
+		pose.EasingDirection = defaultDirection :: Enum.PoseEasingDirection
+		pose.Parent = parentInstance
+		poses[part] = pose
+		return pose, nil
+	end
+
+	-- Sort part names so construction is deterministic.
+	local partNames: { string } = {}
+	for part in pairs(frame.poses) do
+		if typeof(part) ~= "string" then
+			return abort(label .. ".poses keys must be part names")
+		end
+		table.insert(partNames, part)
+	end
+	table.sort(partNames)
+
+	for _, part in ipairs(partNames) do
+		local spec = frame.poses[part]
+		if typeof(spec) ~= "table" then
+			return abort(label .. ".poses." .. part .. " must be an object")
+		end
+		local pose, poseErr = ensurePose(part, 0)
+		if pose == nil then
+			return abort(label .. ": " .. tostring(poseErr))
+		end
+		if isRootPart(part, hierarchy) and part == ANIMATION_ROOT then
+			-- Protocol: the root HumanoidRootPart pose is always identity.
+			pose.CFrame = CFrame.identity
+		else
+			local cf, cfErr = poseCFrame(spec, label .. ".poses." .. part)
+			if cf == nil then
+				return abort(tostring(cfErr))
+			end
+			pose.CFrame = cf
+		end
+		pose.Weight = 1
+		local style, sErr = easingStyle(spec.easing_style, defaultStyle :: Enum.PoseEasingStyle)
+		if style == nil then
+			return abort(label .. ".poses." .. part .. ": " .. tostring(sErr))
+		end
+		local direction, dErr = easingDirection(spec.easing_direction, defaultDirection :: Enum.PoseEasingDirection)
+		if direction == nil then
+			return abort(label .. ".poses." .. part .. ": " .. tostring(dErr))
+		end
+		pose.EasingStyle = style
+		pose.EasingDirection = direction
+	end
+
+	return keyframe, nil
+end
+
+local function createAnimation(action: any): Result
+	local okName, nameErr = PathResolver.validName(action.name)
+	if not okName then
+		return fail("name: " .. tostring(nameErr))
+	end
+	if action.rig ~= nil and action.rig ~= "R15" then
+		return fail("only R15 rigs are supported (got " .. tostring(action.rig) .. ")")
+	end
+	if typeof(action.keyframes) ~= "table" or #action.keyframes == 0 then
+		return fail("keyframes must be a non-empty array")
+	end
+	local hierarchy = action.hierarchy
+	if hierarchy == nil then
+		hierarchy = {}
+	elseif typeof(hierarchy) ~= "table" then
+		return fail("hierarchy must be an object")
+	end
+
+	local priority: Enum.AnimationPriority = Enum.AnimationPriority.Core
+	if action.priority ~= nil then
+		local found = false
+		for _, item in ipairs(Enum.AnimationPriority:GetEnumItems()) do
+			if item.Name == action.priority then
+				priority = item :: any
+				found = true
+			end
+		end
+		if not found then
+			return fail("unknown priority: " .. tostring(action.priority))
+		end
+	end
+
+	local sequence = Instance.new("KeyframeSequence")
+	sequence.Name = action.name
+	sequence.Loop = action.looped == true
+	sequence.Priority = priority
+
+	local keyframes: { Keyframe } = {}
+	for index, frame in ipairs(action.keyframes) do
+		local keyframe, err = buildKeyframe(frame, index, hierarchy)
+		if keyframe == nil then
+			sequence:Destroy()
+			return fail(tostring(err))
+		end
+		keyframe.Parent = sequence
+		table.insert(keyframes, keyframe)
+	end
+
+	if action.markers ~= nil then
+		if typeof(action.markers) ~= "table" then
+			sequence:Destroy()
+			return fail("markers must be an array")
+		end
+		for index, marker in ipairs(action.markers) do
+			if typeof(marker) ~= "table" or typeof(marker.time) ~= "number" or typeof(marker.name) ~= "string" then
+				sequence:Destroy()
+				return fail("markers[" .. tostring(index) .. "] needs a numeric time and a string name")
+			end
+			-- Attach to the keyframe at or just before `time` (earliest keyframe as fallback).
+			local target: Keyframe? = nil
+			for _, keyframe in ipairs(keyframes) do
+				if keyframe.Time <= marker.time and (target == nil or keyframe.Time >= (target :: Keyframe).Time) then
+					target = keyframe
+				end
+			end
+			if target == nil then
+				target = keyframes[1]
+				for _, keyframe in ipairs(keyframes) do
+					if keyframe.Time < (target :: Keyframe).Time then
+						target = keyframe
+					end
+				end
+			end
+			local keyframeMarker = Instance.new("KeyframeMarker")
+			keyframeMarker.Name = marker.name
+			keyframeMarker.Value = if typeof(marker.value) == "string" then marker.value else ""
+			;(target :: Keyframe):AddMarker(keyframeMarker)
+		end
+	end
+
+	local parentPath = if action.parent_path ~= nil then action.parent_path else DEFAULT_ANIMATION_PARENT
+	local parent, parentErr = PathResolver.resolveOrCreateFolders(parentPath)
+	if parent == nil then
+		sequence:Destroy()
+		return fail("parent_path: " .. tostring(parentErr))
+	end
+	sequence.Name = PathResolver.uniqueName(parent, action.name)
+	sequence.Parent = parent
+
+	-- Optional local preview id (not an uploaded asset). Failure is reported, not fatal.
+	local previewId: string? = nil
+	local previewOk, previewResult = pcall(function()
+		return game:GetService("AnimationClipProvider"):RegisterKeyframeSequence(sequence)
+	end)
+	if previewOk and typeof(previewResult) == "string" then
+		previewId = previewResult
+	end
+
+	local message = "created KeyframeSequence " .. (PathResolver.pathOf(sequence) or sequence.Name)
+		.. " (" .. tostring(#keyframes) .. " keyframes, Loop=" .. tostring(sequence.Loop)
+		.. ", Priority=" .. priority.Name .. ")"
+	if previewId then
+		message ..= "; preview id " .. previewId .. " (local to this Studio session; publish it to get a real asset id)"
+	else
+		message ..= "; could not register a preview id (" .. tostring(previewResult) .. ")"
+	end
+	return succeed(message, sequence, previewId)
+end
+
+local function deleteInstance(action: any): Result
+	if typeof(action.path) ~= "string" then
+		return fail("path must be a string")
+	end
+	if PathResolver.isServiceRoot(action.path) then
+		return fail("refusing to delete a service: " .. action.path)
+	end
+	local target, err = PathResolver.resolve(action.path)
+	if target == nil then
+		return fail("path: " .. tostring(err))
+	end
+	local descendants = #target:GetDescendants()
+	-- Parent = nil (rather than Destroy) keeps the instance restorable with Undo.
+	target.Parent = nil
+	return succeed("deleted " .. action.path .. " (" .. tostring(descendants) .. " descendant(s)); use Undo to restore it", nil)
+end
+
+local HANDLERS: { [string]: (any) -> Result } = {
+	create_script = createScript,
+	edit_script = editScript,
+	create_instances = createInstances,
+	create_animation = createAnimation,
+	delete_instance = deleteInstance,
+}
+
+-- Apply one action as a single undo step. Never throws.
+function ActionApplier.apply(action: any): Result
+	if typeof(action) ~= "table" then
+		return fail("action must be an object")
+	end
+	local handler = HANDLERS[action.type]
+	if handler == nil then
+		return fail("unsupported action type: " .. tostring(action.type))
+	end
+
+	local description = if typeof(action.description) == "string" then action.description else action.type
+	local recording = ChangeHistoryService:TryBeginRecording("GODMODE: " .. action.type, "GODMODE: " .. description)
+	if recording == nil then
+		return fail("Studio refused to start an undo recording (another plugin is recording, or playtest is running); nothing was changed")
+	end
+
+	local ok, result = pcall(handler, action)
+	if ok and result.ok then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		if result.created and result.created.Parent ~= nil then
+			pcall(function()
+				Selection:Set({ result.created :: Instance })
+			end)
+		end
+		return result
+	end
+
+	-- Cancel reverts everything done during the recording.
+	ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Cancel)
+	if not ok then
+		return fail("error while applying (changes reverted): " .. tostring(result))
+	end
+	return fail(result.message .. " (nothing was changed)")
+end
+
+return ActionApplier
+]]></ProtectedString>
+      </Properties>
+    </Item>
+    <Item class="ModuleScript" referent="RBXA24B48260AA30EB1C232B47E6A1CE036">
+      <Properties>
+        <string name="Name">ActionPreview</string>
+        <ProtectedString name="Source"><![CDATA[--!strict
+-- ActionPreview: one card per proposed action, with Apply / Reject buttons.
+--
+-- Cards show the action type, target path, a summary (script preview, diff,
+-- instance outline, animation summary) and the server's verification results.
+-- Destructive actions are shown with a red warning and need a second, explicit
+-- "Confirm delete" click. Nothing is applied without a user click.
+
+local Theme = require(script.Parent.Theme)
+local Ui = require(script.Parent.Ui)
+local PathResolver = require(script.Parent.PathResolver)
+local ActionApplier = require(script.Parent.ActionApplier)
+
+local ActionPreview = {}
+ActionPreview.__index = ActionPreview
+
+local PREVIEW_LINES = 20
+local DIFF_LINES = 40
+local OUTLINE_LINES = 30
+
+export type CardState = "pending" | "applying" | "applied" | "failed" | "rejected"
+
+export type Options = {
+	verification: { any },
+	onApply: (action: any) -> ActionApplier.Result,
+	onVerify: ((source: string) -> (boolean, string))?,
+	onResult: (action: any, result: ActionApplier.Result) -> (),
+}
+
+type CardData = {
+	action: any,
+	frame: Frame,
+	buttons: Frame,
+	status: TextLabel,
+	state: CardState,
+	options: Options,
+}
+
+export type Card = typeof(setmetatable({} :: CardData, ActionPreview))
+
+local TYPE_TITLES = {
+	create_script = "Create script",
+	edit_script = "Edit script",
+	create_instances = "Create instances",
+	create_animation = "Create animation",
+	delete_instance = "Delete instance",
+} :: { [string]: string }
+
+---------------------------------------------------------------------------
+-- Summaries
+---------------------------------------------------------------------------
+
+-- Line diff by trimming the common prefix and suffix; good enough to show what an
+-- edit_script replaces without a full LCS.
+function ActionPreview.diff(oldSource: string, newSource: string, maxLines: number): (string, number, number)
+	local old = string.split(oldSource, "\n")
+	local new = string.split(newSource, "\n")
+	local prefix = 0
+	while prefix < #old and prefix < #new and old[prefix + 1] == new[prefix + 1] do
+		prefix += 1
+	end
+	local suffix = 0
+	while suffix < #old - prefix and suffix < #new - prefix and old[#old - suffix] == new[#new - suffix] do
+		suffix += 1
+	end
+	local lines: { string } = {}
+	local removed, added = 0, 0
+	table.insert(lines, "@@ line " .. tostring(prefix + 1) .. " @@")
+	for i = prefix + 1, #old - suffix do
+		removed += 1
+		table.insert(lines, "- " .. old[i])
+	end
+	for i = prefix + 1, #new - suffix do
+		added += 1
+		table.insert(lines, "+ " .. new[i])
+	end
+	if removed == 0 and added == 0 then
+		return "(no changes)", 0, 0
+	end
+	if #lines > maxLines then
+		local extra = #lines - maxLines
+		local kept = table.move(lines, 1, maxLines, 1, {})
+		table.insert(kept, "... (" .. tostring(extra) .. " more diff lines)")
+		lines = kept
+	end
+	return table.concat(lines, "\n"), removed, added
+end
+
+local function outline(node: any, depth: number, lines: { string }, counter: { number })
+	if typeof(node) ~= "table" then
+		return
+	end
+	counter[1] += 1
+	if #lines < OUTLINE_LINES then
+		table.insert(lines, string.rep("  ", depth) .. tostring(node.className) .. " \"" .. tostring(node.name) .. "\"")
+	end
+	if typeof(node.children) == "table" then
+		for _, child in ipairs(node.children) do
+			outline(child, depth + 1, lines, counter)
+		end
+	end
+end
+
+local function currentSource(path: any): string?
+	local target = PathResolver.resolve(path)
+	if target == nil or not target:IsA("LuaSourceContainer") then
+		return nil
+	end
+	local ok, source = pcall(function()
+		return game:GetService("ScriptEditorService"):GetEditorSource(target)
+	end)
+	if ok and typeof(source) == "string" then
+		return source
+	end
+	return (target :: any).Source
+end
+
+-- Pick the verification entries that concern this action. Check labels look like
+-- "structure:<label>", "lint:<label>", "animation:<name>".
+function ActionPreview.relevantChecks(action: any, verification: { any }): { any }
+	local target = ActionApplier.targetPath(action)
+	local name = if typeof(action.name) == "string" then action.name else nil
+	local out = {}
+	for _, entry in ipairs(verification) do
+		if typeof(entry) == "table" and typeof(entry.check) == "string" then
+			local label = entry.check:match("^[^:]*:(.+)$")
+			if label ~= nil and (label == target or label == name or target:sub(-(#label + 1)) == "." .. label) then
+				table.insert(out, entry)
+			end
+		end
+	end
+	return out
+end
+
+---------------------------------------------------------------------------
+-- Card
+---------------------------------------------------------------------------
+
+local function addLabel(parent: Instance, text: string, order: number, colorFn: (() -> Color3)?, props: Ui.Props?): TextLabel
+	local label = Ui.label(text, props)
+	label.LayoutOrder = order
+	if colorFn then
+		Theme.paint(label, "TextColor3", colorFn)
+	end
+	label.Parent = parent
+	return label
+end
+
+local function addVerification(parent: Instance, checks: { any }, order: number)
+	if #checks == 0 then
+		return
+	end
+	local lines: { string } = {}
+	local allOk = true
+	for _, entry in ipairs(checks) do
+		local ok = entry.ok == true
+		allOk = allOk and ok
+		local detail = if typeof(entry.detail) == "string" and entry.detail ~= "" then " - " .. entry.detail else ""
+		table.insert(lines, (if ok then "PASS " else "FAIL ") .. entry.check .. detail)
+	end
+	addLabel(parent, "Server verification:\n" .. table.concat(lines, "\n"), order, if allOk then Theme.success else Theme.error, {
+		TextSize = 13,
+	})
+end
+
+local function describe(card: CardData, body: Frame)
+	local action = card.action
+	local kind = action.type
+	local order = 10
+	if kind == "create_script" then
+		addLabel(body, tostring(action.class) .. " in " .. tostring(action.parent_path), order, Theme.dimText, { TextSize = 13 })
+		if typeof(action.source) == "string" then
+			local block = Ui.codeBlock(action.source, PREVIEW_LINES)
+			block.LayoutOrder = order + 1
+			block.Parent = body
+		end
+	elseif kind == "edit_script" then
+		local old = currentSource(action.path)
+		if old == nil then
+			addLabel(body, "Warning: " .. tostring(action.path) .. " was not found or is not a script; applying will fail.", order, Theme.warning)
+		elseif typeof(action.new_source) == "string" then
+			local text, removed, added = ActionPreview.diff(old, action.new_source, DIFF_LINES)
+			addLabel(body, "Diff: -" .. tostring(removed) .. " / +" .. tostring(added) .. " lines", order, Theme.dimText, { TextSize = 13 })
+			local block = Ui.codeBlock(text, nil)
+			block.LayoutOrder = order + 1
+			block.Parent = body
+		end
+	elseif kind == "create_instances" then
+		local lines: { string } = {}
+		local counter = { 0 }
+		outline(action.tree, 0, lines, counter)
+		if counter[1] > #lines then
+			table.insert(lines, "... (" .. tostring(counter[1] - #lines) .. " more)")
+		end
+		addLabel(body, tostring(counter[1]) .. " instance(s) under " .. tostring(action.parent_path), order, Theme.dimText, { TextSize = 13 })
+		local block = Ui.codeBlock(table.concat(lines, "\n"), nil)
+		block.LayoutOrder = order + 1
+		block.Parent = body
+	elseif kind == "create_animation" then
+		local keyframeCount = if typeof(action.keyframes) == "table" then #action.keyframes else 0
+		local parts: { [string]: boolean } = {}
+		local partCount = 0
+		if typeof(action.keyframes) == "table" then
+			for _, frame in ipairs(action.keyframes) do
+				if typeof(frame) == "table" and typeof(frame.poses) == "table" then
+					for part in pairs(frame.poses) do
+						if not parts[part] then
+							parts[part] = true
+							partCount += 1
+						end
+					end
+				end
+			end
+		end
+		local summary = string.format(
+			"%s rig, %d keyframes, %s s, looped=%s, priority=%s, %d posed parts",
+			tostring(action.rig or "R15"),
+			keyframeCount,
+			tostring(action.duration or "?"),
+			tostring(action.looped == true),
+			tostring(action.priority or "Core"),
+			partCount
+		)
+		addLabel(body, summary, order, Theme.dimText, { TextSize = 13 })
+		if typeof(action.provenance) == "string" then
+			addLabel(body, "Provenance: " .. action.provenance, order + 1, Theme.dimText, { TextSize = 13 })
+		end
+	elseif kind == "delete_instance" then
+		local target = PathResolver.resolve(action.path)
+		local detail = if target
+			then target.ClassName .. " with " .. tostring(#target:GetDescendants()) .. " descendant(s)"
+			else "target not found"
+		addLabel(body, "DESTRUCTIVE: deletes " .. tostring(action.path) .. " (" .. detail .. "). Undo (Ctrl+Z) can restore it.", order, Theme.danger, {
+			Font = Enum.Font.SourceSansBold,
+		})
+	else
+		addLabel(body, "Unsupported action type '" .. tostring(kind) .. "'; it cannot be applied.", order, Theme.error)
+	end
+end
+
+function ActionPreview.new(action: any, options: Options): Card
+	local destructive = ActionApplier.isDestructive(action)
+	local frame = Ui.create("Frame", {
+		Name = "ActionCard",
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BorderSizePixel = 0,
+	}, { Ui.corner(6), Ui.padding(8), Ui.vlist(6) }) :: Frame
+	Theme.paint(frame, "BackgroundColor3", Theme.assistantBubble)
+	local stroke = Ui.stroke(if destructive then Theme.danger else Theme.border)
+	if destructive then
+		(stroke :: UIStroke).Thickness = 2
+	end
+	stroke.Parent = frame
+
+	local kind = if typeof(action) == "table" then action.type else nil
+	local title = (TYPE_TITLES[kind] or tostring(kind)) .. ": " .. ActionApplier.targetPath(action)
+	addLabel(frame, title, 1, nil, { Font = Enum.Font.SourceSansBold })
+	if typeof(action) == "table" and typeof(action.description) == "string" then
+		addLabel(frame, action.description, 2, nil, { TextSize = 14 })
+	end
+
+	local buttons = Ui.create("Frame", {
+		Name = "Buttons",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 26),
+		LayoutOrder = 100,
+	}, { Ui.hlist(6) }) :: Frame
+
+	local status = addLabel(frame, "", 101, Theme.dimText, { TextSize = 13, Visible = false })
+
+	local self = setmetatable({
+		action = action,
+		frame = frame,
+		buttons = buttons,
+		status = status,
+		state = "pending",
+		options = options,
+	} :: CardData, ActionPreview)
+
+	if typeof(action) == "table" then
+		describe(self, frame)
+		addVerification(frame, ActionPreview.relevantChecks(action, options.verification), 50)
+	end
+	buttons.Parent = frame
+	self:showDefaultButtons()
+	return self
+end
+
+function ActionPreview.clearButtons(self: Card)
+	for _, child in ipairs(self.buttons:GetChildren()) do
+		if child:IsA("GuiButton") then
+			child:Destroy()
+		end
+	end
+end
+
+function ActionPreview.setStatus(self: Card, text: string, colorFn: () -> Color3)
+	self.status.Text = text
+	self.status.Visible = true
+	Theme.paint(self.status, "TextColor3", colorFn)
+end
+
+function ActionPreview.showDefaultButtons(self: Card)
+	self:clearButtons()
+	local action = self.action
+	local supported = typeof(action) == "table" and table.find(ActionApplier.SUPPORTED_ACTIONS, action.type) ~= nil
+	if not supported then
+		self.state = "rejected"
+		self:setStatus("Skipped: unsupported action.", Theme.warning)
+		return
+	end
+
+	if ActionApplier.isDestructive(action) then
+		local deleteButton = Ui.button("Delete...", "danger", 90)
+		deleteButton.LayoutOrder = 1
+		deleteButton.Parent = self.buttons
+		deleteButton.MouseButton1Click:Connect(function()
+			self:showConfirmButtons()
+		end)
+	else
+		local applyButton = Ui.button("Apply", "primary", 80)
+		applyButton.LayoutOrder = 1
+		applyButton.Parent = self.buttons
+		applyButton.MouseButton1Click:Connect(function()
+			self:apply()
+		end)
+	end
+
+	local rejectButton = Ui.button("Reject", "normal", 70)
+	rejectButton.LayoutOrder = 2
+	rejectButton.Parent = self.buttons
+	rejectButton.MouseButton1Click:Connect(function()
+		self.state = "rejected"
+		self:clearButtons()
+		self:setStatus("Rejected. Nothing was changed.", Theme.dimText)
+	end)
+
+	local source = if action.type == "create_script" then action.source elseif action.type == "edit_script" then action.new_source else nil
+	local onVerify = self.options.onVerify
+	if typeof(source) == "string" and onVerify then
+		local verifyButton = Ui.button("Re-verify", "normal", 80)
+		verifyButton.LayoutOrder = 3
+		verifyButton.Parent = self.buttons
+		verifyButton.MouseButton1Click:Connect(function()
+			self:setStatus("Verifying...", Theme.dimText)
+			task.spawn(function()
+				local passed, summary = onVerify(source)
+				self:setStatus(summary, if passed then Theme.success else Theme.warning)
+			end)
+		end)
+	end
+end
+
+function ActionPreview.showConfirmButtons(self: Card)
+	self:clearButtons()
+	self:setStatus("This permanently removes " .. ActionApplier.targetPath(self.action) .. " from the place (Undo can restore it). Are you sure?", Theme.danger)
+	local confirmButton = Ui.button("Confirm delete", "danger", 120)
+	confirmButton.LayoutOrder = 1
+	confirmButton.Parent = self.buttons
+	confirmButton.MouseButton1Click:Connect(function()
+		self:apply()
+	end)
+	local cancelButton = Ui.button("Cancel", "normal", 70)
+	cancelButton.LayoutOrder = 2
+	cancelButton.Parent = self.buttons
+	cancelButton.MouseButton1Click:Connect(function()
+		self.status.Visible = false
+		self:showDefaultButtons()
+	end)
+end
+
+function ActionPreview.isPending(self: Card): boolean
+	return self.state == "pending"
+end
+
+-- True when this card may be included in a one-confirmation batch (autonomy 4-5).
+function ActionPreview.isBatchable(self: Card): boolean
+	local action = self.action
+	return self.state == "pending"
+		and typeof(action) == "table"
+		and action.requires_approval == false
+		and not ActionApplier.isDestructive(action)
+		and table.find(ActionApplier.SUPPORTED_ACTIONS, action.type) ~= nil
+end
+
+-- Apply this card's action and show the real outcome. Returns the result.
+function ActionPreview.apply(self: Card): ActionApplier.Result?
+	if self.state ~= "pending" then
+		return nil
+	end
+	self.state = "applying"
+	self:clearButtons()
+	self:setStatus("Applying...", Theme.dimText)
+	local result = self.options.onApply(self.action)
+	if result.ok then
+		self.state = "applied"
+		self:setStatus("Applied: " .. result.message, Theme.success)
+	else
+		self.state = "failed"
+		self:setStatus("FAILED: " .. result.message, Theme.error)
+	end
+	self.options.onResult(self.action, result)
+	return result
+end
+
+return ActionPreview
+]]></ProtectedString>
+      </Properties>
+    </Item>
+    <Item class="ModuleScript" referent="RBX06C348926C4AC61361488BBA2CCD8697">
+      <Properties>
+        <string name="Name">ChatUI</string>
+        <ProtectedString name="Source"><![CDATA[--!strict
+-- ChatUI: the dock-widget chat surface. It owns layout only; Main wires callbacks
+-- to the HTTP client and the action pipeline.
+--
+--  +---------------------------------------------+
+--  | (o) Connected  [3 - Engineer v] [Gear] [Clr] |  header
+--  | Server URL [....]  Token [....]  [Save]      |  settings (collapsible)
+--  |---------------------------------------------|
+--  | message list (user / assistant bubbles,      |
+--  | action cards, system notices)                |
+--  |---------------------------------------------|
+--  | [ Ask GODMODE...                  ] [Send]   |  input
+--  +---------------------------------------------+
+
+local Theme = require(script.Parent.Theme)
+local Ui = require(script.Parent.Ui)
+local Markdown = require(script.Parent.Markdown)
+
+local ChatUI = {}
+ChatUI.__index = ChatUI
+
+export type Callbacks = {
+	onSend: (text: string) -> (),
+	onAutonomyChanged: (level: number) -> (),
+	onSaveSettings: (url: string, token: string) -> (),
+	onRefreshStatus: () -> (),
+	onClear: () -> (),
+}
+
+export type Initial = {
+	url: string,
+	token: string,
+	autonomy: number,
+}
+
+export type NoticeKind = "info" | "success" | "warning" | "error"
+export type Status = "connected" | "disconnected" | "checking"
+
+ChatUI.AUTONOMY_LABELS = { "Assistant", "Copilot", "Engineer", "Autonomous", "Research" }
+ChatUI.AUTONOMY_HINTS = {
+	"Answers questions; never proposes changes to your place.",
+	"Proposes changes; you approve every action.",
+	"Writes and verifies code; you approve every action.",
+	"Safe, verified actions are applied automatically; destructive ones still need confirmation.",
+	"Long multi-step work; same approval rules as Autonomous.",
+}
+
+local HEADER_HEIGHT = 34
+local SETTINGS_HEIGHT = 96
+local INPUT_HEIGHT = 64
+local CODE_PREVIEW_LINES = 60
+
+type State = {
+	root: Frame,
+	header: Frame,
+	settings: Frame,
+	messages: ScrollingFrame,
+	inputBar: Frame,
+	input: TextBox,
+	sendButton: TextButton,
+	statusDot: Frame,
+	statusLabel: TextLabel,
+	autonomyButton: TextButton,
+	autonomyMenu: Frame,
+	urlBox: TextBox,
+	tokenBox: TextBox,
+	callbacks: Callbacks,
+	autonomy: number,
+	order: number,
+	busy: boolean,
+	settingsOpen: boolean,
+}
+
+export type ChatUI = typeof(setmetatable({} :: State, ChatUI))
+
+local function autonomyText(level: number): string
+	return tostring(level) .. " - " .. ChatUI.AUTONOMY_LABELS[level] .. "  v"
+end
+
+function ChatUI.new(parent: Instance, callbacks: Callbacks, initial: Initial): ChatUI
+	local root = Ui.create("Frame", {
+		Name = "GodmodeRoot",
+		Size = UDim2.fromScale(1, 1),
+		BorderSizePixel = 0,
+		Parent = parent,
+	}) :: Frame
+	Theme.paint(root, "BackgroundColor3", Theme.background)
+
+	-- Header ---------------------------------------------------------------
+	local header = Ui.create("Frame", {
+		Name = "Header",
+		Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
+		BorderSizePixel = 0,
+		ZIndex = 2,
+		Parent = root,
+	}, { Ui.padding(4), Ui.hlist(6) }) :: Frame
+	Theme.paint(header, "BackgroundColor3", Theme.panel)
+
+	local statusDot = Ui.create("Frame", {
+		Name = "StatusDot",
+		Size = UDim2.fromOffset(10, 10),
+		BorderSizePixel = 0,
+		BackgroundColor3 = Color3.fromRGB(150, 150, 150),
+		LayoutOrder = 1,
+		Parent = header,
+	}, { Ui.corner(5) }) :: Frame
+
+	local statusLabel = Ui.label("Checking...", {
+		Size = UDim2.new(0, 90, 0, 24),
+		AutomaticSize = Enum.AutomaticSize.None,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextWrapped = false,
+		TextSize = 14,
+		LayoutOrder = 2,
+	})
+	statusLabel.Parent = header
+
+	local autonomyButton = Ui.button(autonomyText(initial.autonomy), "normal", 120)
+	autonomyButton.LayoutOrder = 3
+	autonomyButton.Parent = header
+
+	local settingsButton = Ui.button("Settings", "normal", 60)
+	settingsButton.LayoutOrder = 4
+	settingsButton.Parent = header
+
+	local clearButton = Ui.button("Clear", "normal", 44)
+	clearButton.LayoutOrder = 5
+	clearButton.Parent = header
+
+	-- Autonomy dropdown menu (overlay) -------------------------------------
+	local autonomyMenu = Ui.create("Frame", {
+		Name = "AutonomyMenu",
+		Size = UDim2.fromOffset(300, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Position = UDim2.fromOffset(4, HEADER_HEIGHT),
+		Visible = false,
+		ZIndex = 10,
+		BorderSizePixel = 0,
+		Parent = root,
+	}, { Ui.padding(4), Ui.vlist(2), Ui.corner(4) }) :: Frame
+	Theme.paint(autonomyMenu, "BackgroundColor3", Theme.panel)
+	Ui.stroke(Theme.border).Parent = autonomyMenu
+
+	-- Settings panel --------------------------------------------------------
+	local settings = Ui.create("Frame", {
+		Name = "Settings",
+		Size = UDim2.new(1, 0, 0, SETTINGS_HEIGHT),
+		Position = UDim2.fromOffset(0, HEADER_HEIGHT),
+		Visible = false,
+		BorderSizePixel = 0,
+		Parent = root,
+	}, { Ui.padding(6), Ui.vlist(4) }) :: Frame
+	Theme.paint(settings, "BackgroundColor3", Theme.panel)
+
+	local urlBox = Ui.textBox("Server URL, e.g. http://127.0.0.1:8765")
+	urlBox.Text = initial.url
+	urlBox.LayoutOrder = 1
+	urlBox.Parent = settings
+
+	local tokenBox = Ui.textBox("Access token (optional)")
+	tokenBox.Text = initial.token
+	tokenBox.LayoutOrder = 2
+	tokenBox.Parent = settings
+
+	local saveRow = Ui.create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 26),
+		LayoutOrder = 3,
+		Parent = settings,
+	}, { Ui.hlist(6) })
+	local saveButton = Ui.button("Save & Reconnect", "primary", 130)
+	saveButton.Parent = saveRow
+
+	-- Message list ------------------------------------------------------------
+	local messages = Ui.create("ScrollingFrame", {
+		Name = "Messages",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, HEADER_HEIGHT),
+		Size = UDim2.new(1, 0, 1, -(HEADER_HEIGHT + INPUT_HEIGHT)),
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarThickness = 8,
+		VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+		Parent = root,
+	}, { Ui.padding(8), Ui.vlist(8) }) :: ScrollingFrame
+	Theme.paint(messages, "ScrollBarImageColor3", Theme.dimText)
+
+	-- Input bar ---------------------------------------------------------------
+	local inputBar = Ui.create("Frame", {
+		Name = "InputBar",
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.fromScale(0, 1),
+		Size = UDim2.new(1, 0, 0, INPUT_HEIGHT),
+		BorderSizePixel = 0,
+		Parent = root,
+	}, { Ui.padding(6) }) :: Frame
+	Theme.paint(inputBar, "BackgroundColor3", Theme.panel)
+
+	local input = Ui.textBox("Ask GODMODE... (Enter to send)")
+	input.Size = UDim2.new(1, -76, 1, 0)
+	input.Parent = inputBar
+
+	local sendButton = Ui.button("Send", "primary", 70)
+	sendButton.AnchorPoint = Vector2.new(1, 0)
+	sendButton.Position = UDim2.fromScale(1, 0)
+	sendButton.Size = UDim2.new(0, 70, 1, 0)
+	sendButton.Parent = inputBar
+
+	local self = setmetatable({
+		root = root,
+		header = header,
+		settings = settings,
+		messages = messages,
+		inputBar = inputBar,
+		input = input,
+		sendButton = sendButton,
+		statusDot = statusDot,
+		statusLabel = statusLabel,
+		autonomyButton = autonomyButton,
+		autonomyMenu = autonomyMenu,
+		urlBox = urlBox,
+		tokenBox = tokenBox,
+		callbacks = callbacks,
+		autonomy = initial.autonomy,
+		order = 0,
+		busy = false,
+		settingsOpen = false,
+	} :: State, ChatUI)
+
+	-- Autonomy menu entries.
+	for level, name in ipairs(ChatUI.AUTONOMY_LABELS) do
+		local entry = Ui.create("TextButton", {
+			Size = UDim2.new(1, 0, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			Text = "",
+			ZIndex = 11,
+			LayoutOrder = level,
+			Parent = autonomyMenu,
+		}, { Ui.padding(4), Ui.vlist(0) }) :: TextButton
+		local title = Ui.label(tostring(level) .. " - " .. name, {
+			Font = Enum.Font.SourceSansSemibold,
+			ZIndex = 11,
+		})
+		title.Parent = entry
+		local hint = Ui.label(ChatUI.AUTONOMY_HINTS[level], { TextSize = 13, ZIndex = 11 })
+		Theme.paint(hint, "TextColor3", Theme.dimText)
+		hint.Parent = entry
+		entry.MouseButton1Click:Connect(function()
+			self:setAutonomy(level)
+			autonomyMenu.Visible = false
+			callbacks.onAutonomyChanged(level)
+		end)
+	end
+
+	autonomyButton.MouseButton1Click:Connect(function()
+		autonomyMenu.Visible = not autonomyMenu.Visible
+	end)
+
+	settingsButton.MouseButton1Click:Connect(function()
+		self:setSettingsOpen(not self.settingsOpen)
+	end)
+
+	clearButton.MouseButton1Click:Connect(function()
+		callbacks.onClear()
+	end)
+
+	saveButton.MouseButton1Click:Connect(function()
+		callbacks.onSaveSettings(urlBox.Text, tokenBox.Text)
+		self:setSettingsOpen(false)
+	end)
+
+	statusLabel.InputBegan:Connect(function(inputObject: InputObject)
+		if inputObject.UserInputType == Enum.UserInputType.MouseButton1 then
+			callbacks.onRefreshStatus()
+		end
+	end)
+
+	local function submit()
+		if self.busy then
+			return
+		end
+		local text = input.Text:match("^%s*(.-)%s*$") or ""
+		if text == "" then
+			return
+		end
+		input.Text = ""
+		callbacks.onSend(text)
+	end
+
+	input.FocusLost:Connect(function(enterPressed: boolean)
+		if enterPressed then
+			submit()
+		end
+	end)
+	sendButton.MouseButton1Click:Connect(submit)
+
+	return self
+end
+
+function ChatUI.setSettingsOpen(self: ChatUI, open: boolean): ()
+	self.settingsOpen = open
+	self.settings.Visible = open
+	local top = HEADER_HEIGHT + (if open then SETTINGS_HEIGHT else 0)
+	self.messages.Position = UDim2.fromOffset(0, top)
+	self.messages.Size = UDim2.new(1, 0, 1, -(top + INPUT_HEIGHT))
+end
+
+function ChatUI.setAutonomy(self: ChatUI, level: number): ()
+	self.autonomy = level
+	self.autonomyButton.Text = autonomyText(level)
+end
+
+function ChatUI.setStatus(self: ChatUI, status: Status, detail: string?): ()
+	if status == "connected" then
+		self.statusDot.BackgroundColor3 = Theme.success()
+		self.statusLabel.Text = detail or "Connected"
+	elseif status == "checking" then
+		self.statusDot.BackgroundColor3 = Theme.warning()
+		self.statusLabel.Text = detail or "Checking..."
+	else
+		self.statusDot.BackgroundColor3 = Theme.danger()
+		self.statusLabel.Text = detail or "Offline (click to retry)"
+	end
+end
+
+function ChatUI.setBusy(self: ChatUI, busy: boolean): ()
+	self.busy = busy
+	self.sendButton.Text = if busy then "..." else "Send"
+	self.sendButton.Active = not busy
+	self.sendButton.AutoButtonColor = not busy
+end
+
+function ChatUI.nextOrder(self: ChatUI): number
+	self.order += 1
+	return self.order
+end
+
+-- Append any frame (e.g. an action card) to the message list.
+function ChatUI.append(self: ChatUI, frame: GuiObject): ()
+	frame.LayoutOrder = self:nextOrder()
+	frame.Parent = self.messages
+	self:scrollToBottom()
+end
+
+function ChatUI.scrollToBottom(self: ChatUI): ()
+	task.defer(function()
+		local messages = self.messages
+		local maxY = math.max(0, messages.AbsoluteCanvasSize.Y - messages.AbsoluteWindowSize.Y)
+		messages.CanvasPosition = Vector2.new(0, maxY)
+	end)
+end
+
+local function bubble(role: "user" | "assistant"): Frame
+	local frame = Ui.create("Frame", {
+		Name = if role == "user" then "UserMessage" else "AssistantMessage",
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BorderSizePixel = 0,
+	}, { Ui.corner(6), Ui.padding(8), Ui.vlist(6) }) :: Frame
+	Theme.paint(frame, "BackgroundColor3", if role == "user" then Theme.userBubble else Theme.assistantBubble)
+	local who = Ui.label(if role == "user" then "You" else "GODMODE", {
+		Font = Enum.Font.SourceSansBold,
+		TextSize = 13,
+		LayoutOrder = 0,
+	})
+	Theme.paint(who, "TextColor3", Theme.dimText)
+	who.Parent = frame
+	return frame
+end
+
+function ChatUI.addUserMessage(self: ChatUI, text: string): Frame
+	local frame = bubble("user")
+	local body = Ui.label(text, { LayoutOrder = 1 })
+	body.Parent = frame
+	self:append(frame)
+	return frame
+end
+
+-- Render markdown-lite: prose as RichText labels, fenced code as monospace blocks.
+function ChatUI.addAssistantMessage(self: ChatUI, markdown: string): Frame
+	local frame = bubble("assistant")
+	local order = 1
+	for _, segment in ipairs(Markdown.parse(markdown)) do
+		local element: GuiObject
+		if segment.kind == "code" then
+			element = Ui.codeBlock(segment.text, CODE_PREVIEW_LINES)
+		else
+			element = Ui.label(Markdown.toRichText(segment.text), { RichText = true })
+		end
+		element.LayoutOrder = order
+		element.Parent = frame
+		order += 1
+	end
+	self:append(frame)
+	return frame
+end
+
+function ChatUI.addNotice(self: ChatUI, kind: NoticeKind, text: string): TextLabel
+	local colorFn: () -> Color3 = Theme.dimText
+	if kind == "error" then
+		colorFn = Theme.error
+	elseif kind == "warning" then
+		colorFn = Theme.warning
+	elseif kind == "success" then
+		colorFn = Theme.success
+	end
+	local label = Ui.label(text, { TextSize = 14, TextColor3 = colorFn() })
+	Theme.paint(label, "TextColor3", colorFn)
+	self:append(label)
+	return label
+end
+
+function ChatUI.clear(self: ChatUI): ()
+	for _, child in ipairs(self.messages:GetChildren()) do
+		if child:IsA("GuiObject") then
+			child:Destroy()
+		end
+	end
+end
+
+function ChatUI.focusInput(self: ChatUI): ()
+	self.input:CaptureFocus()
+end
+
+return ChatUI
+]]></ProtectedString>
+      </Properties>
+    </Item>
+    <Item class="ModuleScript" referent="RBX153ABC58BAF8C96151CCCBAFBE9FFD76">
+      <Properties>
+        <string name="Name">Context</string>
+        <ProtectedString name="Source"><![CDATA[--!strict
+-- Context: collects what the user is looking at, for POST /chat `context`.
+--   selection  - Selection:Get() as {path, className, name}
+--   openScript - StudioService.ActiveScript path + source, when a script tab is active
+-- Sizes are capped so a request stays well below the server's 1 MiB limit.
+
+local Selection = game:GetService("Selection")
+
+local PathResolver = require(script.Parent.PathResolver)
+
+local Context = {}
+
+local MAX_SELECTION = 50
+local MAX_SOURCE_CHARS = 200000
+
+export type SelectionItem = { path: string, className: string, name: string }
+export type OpenScript = { path: string, source: string }
+export type Payload = { selection: { SelectionItem }, openScript: OpenScript? }
+
+function Context.selection(): { SelectionItem }
+	local items: { SelectionItem } = {}
+	for _, instance in ipairs(Selection:Get()) do
+		if #items >= MAX_SELECTION then
+			break
+		end
+		local path = PathResolver.pathOf(instance)
+		if path then
+			table.insert(items, { path = path, className = instance.ClassName, name = instance.Name })
+		end
+	end
+	return items
+end
+
+function Context.openScript(): OpenScript?
+	local ok, active = pcall(function()
+		return (game:GetService("StudioService") :: any).ActiveScript
+	end)
+	if not ok or typeof(active) ~= "Instance" or not active:IsA("LuaSourceContainer") then
+		return nil
+	end
+	local path = PathResolver.pathOf(active)
+	if path == nil then
+		return nil
+	end
+	local sourceOk, source = pcall(function()
+		return game:GetService("ScriptEditorService"):GetEditorSource(active)
+	end)
+	if not sourceOk or typeof(source) ~= "string" then
+		local propertyOk, propertySource = pcall(function()
+			return (active :: any).Source
+		end)
+		if not propertyOk or typeof(propertySource) ~= "string" then
+			return nil
+		end
+		source = propertySource
+	end
+	if #source > MAX_SOURCE_CHARS then
+		source = source:sub(1, MAX_SOURCE_CHARS) .. "\n-- [GODMODE: source truncated by the plugin]"
+	end
+	return { path = path, source = source }
+end
+
+function Context.collect(): Payload
+	return { selection = Context.selection(), openScript = Context.openScript() }
+end
+
+return Context
+]]></ProtectedString>
+      </Properties>
+    </Item>
+    <Item class="ModuleScript" referent="RBX2D05A3DA7754F5BD304DD6D9807141E5">
+      <Properties>
+        <string name="Name">HttpClient</string>
+        <ProtectedString name="Source"><![CDATA[--!strict
+-- HttpClient: JSON-over-HTTP calls to the local GODMODE server.
+-- All network access goes through HttpService:RequestAsync inside pcall, with a
+-- client-side timeout, and every failure is turned into a human-readable message.
+
+local HttpService = game:GetService("HttpService")
+
+local HttpClient = {}
+HttpClient.__index = HttpClient
+
+export type Response = {
+	ok: boolean,
+	status: number,
+	body: any,
+	error: string?,
+}
+
+export type Client = typeof(setmetatable(
+	{} :: { baseUrl: string, token: string?, timeout: number },
+	HttpClient
+))
+
+local DEFAULT_TIMEOUT = 120
+
+local PERMISSION_HELP = "Studio blocked the HTTP request. (1) When Studio asks whether GODMODE may "
+	.. "send HTTP requests to 127.0.0.1, choose Allow; if you dismissed that prompt, open "
+	.. "Plugins > Manage Plugins, find GODMODE and allow its HTTP access. (2) Make sure "
+	.. "Game Settings > Security > Allow HTTP Requests is on for this place."
+
+function HttpClient.new(baseUrl: string, token: string?, timeout: number?): Client
+	local self = setmetatable({
+		baseUrl = HttpClient.normaliseUrl(baseUrl),
+		token = if token ~= nil and token ~= "" then token else nil,
+		timeout = timeout or DEFAULT_TIMEOUT,
+	}, HttpClient)
+	return self
+end
+
+-- Strip whitespace and trailing slashes; default to http:// when no scheme is given.
+function HttpClient.normaliseUrl(url: string): string
+	local trimmed = url:match("^%s*(.-)%s*$") or url
+	trimmed = trimmed:gsub("/+$", "")
+	if not trimmed:match("^https?://") then
+		trimmed = "http://" .. trimmed
+	end
+	return trimmed
+end
+
+-- Translate a raw RequestAsync error into a helpful message.
+function HttpClient.explainError(message: string): string
+	local lower = message:lower()
+	if lower:find("not enabled", 1, true)
+		or lower:find("permission", 1, true)
+		or lower:find("not allowed", 1, true)
+		or lower:find("denied", 1, true)
+	then
+		return PERMISSION_HELP .. " (Studio said: " .. message .. ")"
+	end
+	if lower:find("connectfail", 1, true)
+		or lower:find("couldn't connect", 1, true)
+		or lower:find("connection refused", 1, true)
+		or lower:find("httperror", 1, true)
+	then
+		return "Could not reach the GODMODE server. Is it running? Start it with "
+			.. "`python -m godmode.server` and check the server URL in settings. (" .. message .. ")"
+	end
+	return message
+end
+
+-- Run RequestAsync on its own thread and race it against a timeout.
+local function requestWithTimeout(options: { [string]: any }, timeout: number): (boolean, any)
+	local finished = false
+	local success = false
+	local payload: any = nil
+	local signal = Instance.new("BindableEvent")
+
+	task.spawn(function()
+		local ok, result = pcall(function()
+			return HttpService:RequestAsync(options :: any)
+		end)
+		if not finished then
+			finished = true
+			success = ok
+			payload = result
+			signal:Fire()
+		end
+	end)
+
+	task.delay(timeout, function()
+		if not finished then
+			finished = true
+			success = false
+			payload = "request timed out after " .. tostring(timeout) .. " seconds"
+			signal:Fire()
+		end
+	end)
+
+	if not finished then
+		signal.Event:Wait()
+	end
+	signal:Destroy()
+	return success, payload
+end
+
+function HttpClient.request(self: Client, method: string, path: string, body: any?): Response
+	local headers: { [string]: string } = {
+		["Accept"] = "application/json",
+	}
+	if self.token then
+		-- docs/PLUGIN_PROTOCOL.md: optional shared secret header.
+		headers["X-Godmode-Token"] = self.token
+	end
+
+	local options: { [string]: any } = {
+		Url = self.baseUrl .. path,
+		Method = method,
+		Headers = headers,
+	}
+
+	if body ~= nil then
+		local encodedOk, encoded = pcall(function()
+			return HttpService:JSONEncode(body)
+		end)
+		if not encodedOk then
+			return { ok = false, status = 0, body = nil, error = "could not encode request: " .. tostring(encoded) }
+		end
+		headers["Content-Type"] = "application/json"
+		options.Body = encoded
+	end
+
+	local ok, result = requestWithTimeout(options, self.timeout)
+	if not ok then
+		return { ok = false, status = 0, body = nil, error = HttpClient.explainError(tostring(result)) }
+	end
+
+	local decoded: any = nil
+	local rawBody = result.Body
+	if typeof(rawBody) == "string" and rawBody ~= "" then
+		local decodeOk, value = pcall(function()
+			return HttpService:JSONDecode(rawBody)
+		end)
+		if decodeOk then
+			decoded = value
+		end
+	end
+
+	if not result.Success then
+		local detail = ""
+		-- Protocol error shape: {"ok": false, "error": {"code": "...", "message": "..."}}
+		if typeof(decoded) == "table" and typeof(decoded.error) == "table" then
+			local code = decoded.error.code
+			local text = decoded.error.message
+			detail = ": " .. (if typeof(code) == "string" then code .. " - " else "")
+				.. (if typeof(text) == "string" then text else "")
+		elseif typeof(decoded) == "table" and typeof(decoded.error) == "string" then
+			detail = ": " .. decoded.error
+		elseif typeof(rawBody) == "string" then
+			detail = ": " .. rawBody:sub(1, 300)
+		end
+		local message = "server returned HTTP " .. tostring(result.StatusCode) .. detail
+		if result.StatusCode == 401 or result.StatusCode == 403 then
+			message ..= " (check the access token in GODMODE Settings; it must match the server's --token)"
+		end
+		return { ok = false, status = result.StatusCode, body = decoded, error = message }
+	end
+
+	if typeof(decoded) ~= "table" then
+		return { ok = false, status = result.StatusCode, body = nil, error = "server response was not a JSON object" }
+	end
+
+	if typeof(decoded) == "table" and decoded.ok == false then
+		local message = "server reported an error"
+		if typeof(decoded.error) == "table" and typeof(decoded.error.message) == "string" then
+			message ..= ": " .. decoded.error.message
+		end
+		return { ok = false, status = result.StatusCode, body = decoded, error = message }
+	end
+
+	return { ok = true, status = result.StatusCode, body = decoded, error = nil }
+end
+
+function HttpClient.get(self: Client, path: string): Response
+	return self:request("GET", path, nil)
+end
+
+function HttpClient.post(self: Client, path: string, body: any): Response
+	return self:request("POST", path, body)
+end
+
+return HttpClient
+]]></ProtectedString>
+      </Properties>
+    </Item>
+    <Item class="ModuleScript" referent="RBX8D8B82D87C76B410A12F39B67264F4F8">
+      <Properties>
+        <string name="Name">Markdown</string>
+        <ProtectedString name="Source"><![CDATA[--!strict
+-- Markdown: a deliberately small markdown subset for chat bubbles.
+--   * fenced code blocks (```lang ... ```) become separate monospace segments
+--   * inside prose: **bold**, `inline code`, and "# heading" lines
+-- Everything else is shown as plain text. Prose is escaped before rich-text tags
+-- are added, so server text can never inject arbitrary rich-text markup.
+
+local Markdown = {}
+
+export type Segment = {
+	kind: "text" | "code",
+	text: string,
+	language: string?,
+}
+
+-- Escape the five characters that RichText treats as markup.
+function Markdown.escape(text: string): string
+	local escaped = text:gsub("&", "&amp;")
+	escaped = escaped:gsub("<", "&lt;")
+	escaped = escaped:gsub(">", "&gt;")
+	escaped = escaped:gsub('"', "&quot;")
+	escaped = escaped:gsub("'", "&apos;")
+	return escaped
+end
+
+-- Split markdown into prose and fenced-code segments, preserving order.
+function Markdown.parse(source: string): { Segment }
+	local segments: { Segment } = {}
+	local prose: { string } = {}
+	local code: { string } = {}
+	local inCode = false
+	local language: string? = nil
+
+	local function flushProse()
+		if #prose > 0 then
+			local text = table.concat(prose, "\n")
+			if text:match("%S") then
+				table.insert(segments, { kind = "text", text = text })
+			end
+			table.clear(prose)
+		end
+	end
+
+	-- Normalise line endings, then walk line by line.
+	local normalised = source:gsub("\r\n", "\n")
+	for line in (normalised .. "\n"):gmatch("([^\n]*)\n") do
+		local fence = line:match("^%s*```%s*([%w_%+%-]*)%s*$")
+		if fence ~= nil then
+			if inCode then
+				table.insert(segments, { kind = "code", text = table.concat(code, "\n"), language = language })
+				table.clear(code)
+				inCode = false
+				language = nil
+			else
+				flushProse()
+				inCode = true
+				language = if fence ~= "" then fence else nil
+			end
+		elseif inCode then
+			table.insert(code, line)
+		else
+			table.insert(prose, line)
+		end
+	end
+
+	if inCode then
+		-- Unterminated fence: still show the code rather than dropping it.
+		table.insert(segments, { kind = "code", text = table.concat(code, "\n"), language = language })
+	end
+	flushProse()
+	return segments
+end
+
+-- Convert a prose segment into RichText markup (escaped first, then tags added).
+function Markdown.toRichText(text: string): string
+	local lines: { string } = {}
+	for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+		local heading = line:match("^%s*#+%s+(.*)$")
+		local escaped = Markdown.escape(heading or line)
+		escaped = escaped:gsub("%*%*(.-)%*%*", "<b>%1</b>")
+		escaped = escaped:gsub("`([^`]+)`", '<font face="RobotoMono">%1</font>')
+		escaped = escaped:gsub("^(%s*)[%-%*] ", "%1• ")
+		if heading then
+			escaped = "<b>" .. escaped .. "</b>"
+		end
+		table.insert(lines, escaped)
+	end
+	return table.concat(lines, "\n")
+end
+
+return Markdown
+]]></ProtectedString>
+      </Properties>
+    </Item>
+    <Item class="ModuleScript" referent="RBX710BB6D02EFDA1639BBF63882057C66D">
+      <Properties>
+        <string name="Name">PathResolver</string>
+        <ProtectedString name="Source"><![CDATA[--!strict
+-- PathResolver: converts protocol dot paths ("Workspace.Map.Door") to instances and back.
+--
+-- Security: only services on ALLOWED_SERVICES can be addressed. Anything else
+-- (CoreGui, CorePackages, PluginGuiService, RobloxReplicatedStorage, ...) is refused,
+-- so a server can never make the plugin touch Studio internals or other plugins.
+-- Per docs/PLUGIN_PROTOCOL.md the first segment is resolved with game:GetService and
+-- every following segment with FindFirstChild. Generated names never contain dots.
+
+local PathResolver = {}
+
+PathResolver.ALLOWED_SERVICES = {
+	Workspace = true,
+	ReplicatedStorage = true,
+	ReplicatedFirst = true,
+	ServerScriptService = true,
+	ServerStorage = true,
+	StarterGui = true,
+	StarterPack = true,
+	StarterPlayer = true,
+	Lighting = true,
+	SoundService = true,
+	Teams = true,
+	TextChatService = true,
+	MaterialService = true,
+} :: { [string]: boolean }
+
+local MAX_SEGMENTS = 64
+local MAX_NAME_LENGTH = 100
+
+-- Split and validate a path. Returns the segments or an error message.
+function PathResolver.split(path: any): ({ string }?, string?)
+	if typeof(path) ~= "string" or path == "" then
+		return nil, "path must be a non-empty string"
+	end
+	local text = path :: string
+	if text:sub(1, 5) == "game." then
+		text = text:sub(6)
+	end
+	local segments = string.split(text, ".")
+	if #segments > MAX_SEGMENTS then
+		return nil, "path is too deep: " .. path
+	end
+	for _, segment in ipairs(segments) do
+		if segment == "" then
+			return nil, "path has an empty segment: " .. path
+		end
+	end
+	if not PathResolver.ALLOWED_SERVICES[segments[1]] then
+		return nil, "refusing path outside the allowed game services: " .. path
+	end
+	return segments, nil
+end
+
+-- Validate a single instance name supplied by the server.
+function PathResolver.validName(name: any): (boolean, string?)
+	if typeof(name) ~= "string" or name == "" then
+		return false, "name must be a non-empty string"
+	end
+	if #(name :: string) > MAX_NAME_LENGTH then
+		return false, "name is longer than " .. tostring(MAX_NAME_LENGTH) .. " characters"
+	end
+	if (name :: string):find(".", 1, true) then
+		return false, "name must not contain '.': " .. (name :: string)
+	end
+	return true, nil
+end
+
+local function getService(name: string): Instance?
+	local ok, service = pcall(function()
+		return game:GetService(name)
+	end)
+	if ok then
+		return service
+	end
+	return nil
+end
+
+-- Resolve an existing instance. Never creates anything.
+function PathResolver.resolve(path: any): (Instance?, string?)
+	local segments, err = PathResolver.split(path)
+	if segments == nil then
+		return nil, err
+	end
+	local current = getService(segments[1])
+	if current == nil then
+		return nil, "unknown service: " .. segments[1]
+	end
+	for i = 2, #segments do
+		local child = (current :: Instance):FindFirstChild(segments[i])
+		if child == nil then
+			return nil, "not found: '" .. segments[i] .. "' in " .. table.concat(segments, ".", 1, i - 1)
+		end
+		current = child
+	end
+	return current, nil
+end
+
+-- Resolve a path, creating missing Folders after the service. Used only for
+-- create_animation, which the protocol explicitly allows to create its folders.
+function PathResolver.resolveOrCreateFolders(path: any): (Instance?, string?, { Instance })
+	local created: { Instance } = {}
+	local segments, err = PathResolver.split(path)
+	if segments == nil then
+		return nil, err, created
+	end
+	local current = getService(segments[1])
+	if current == nil then
+		return nil, "unknown service: " .. segments[1], created
+	end
+	for i = 2, #segments do
+		local okName, nameErr = PathResolver.validName(segments[i])
+		if not okName then
+			return nil, nameErr, created
+		end
+		local child = (current :: Instance):FindFirstChild(segments[i])
+		if child == nil then
+			local folder = Instance.new("Folder")
+			folder.Name = segments[i]
+			folder.Parent = current
+			table.insert(created, folder)
+			child = folder
+		end
+		current = child
+	end
+	return current, nil, created
+end
+
+-- Build the protocol path of an instance (service name first), or nil when the
+-- instance is not inside the DataModel.
+function PathResolver.pathOf(instance: Instance): string?
+	local parts: { string } = {}
+	local current: Instance? = instance
+	while current ~= nil and current ~= game do
+		local parent: Instance? = current.Parent
+		if parent == game then
+			table.insert(parts, 1, current.ClassName)
+		else
+			table.insert(parts, 1, current.Name)
+		end
+		current = parent
+	end
+	if current ~= game or #parts == 0 then
+		return nil
+	end
+	return table.concat(parts, ".")
+end
+
+-- True when `path` names a service itself (deleting or replacing it is refused).
+function PathResolver.isServiceRoot(path: string): boolean
+	local segments = PathResolver.split(path)
+	return segments ~= nil and #segments == 1
+end
+
+-- Pick a name that is free under `parent` by appending _2, _3, ...
+function PathResolver.uniqueName(parent: Instance, name: string): string
+	if parent:FindFirstChild(name) == nil then
+		return name
+	end
+	local index = 2
+	while parent:FindFirstChild(name .. "_" .. tostring(index)) ~= nil do
+		index += 1
+	end
+	return name .. "_" .. tostring(index)
+end
+
+return PathResolver
+]]></ProtectedString>
+      </Properties>
+    </Item>
+    <Item class="ModuleScript" referent="RBXF1448AA54ED5B1793E207D926C98D31C">
+      <Properties>
+        <string name="Name">PropertyDecoder</string>
+        <ProtectedString name="Source"><![CDATA[--!strict
+-- PropertyDecoder: turns the JSON property encoding from docs/PLUGIN_PROTOCOL.md into
+-- Roblox values. Only the value types below are accepted; anything else is refused.
+-- Nothing here evaluates code: every value is built by a fixed constructor.
+--
+-- Supported encodings (type tags):
+--   number / string / boolean   raw JSON value
+--   Vector3     {"$type": "Vector3", "value": [x, y, z]}
+--   Vector2     {"$type": "Vector2", "value": [x, y]}
+--   CFrame      {"$type": "CFrame", "position": [x, y, z], "rotation": [rx, ry, rz]}  degrees,
+--               CFrame.new(x, y, z) * CFrame.fromOrientation(rad rx, rad ry, rad rz)
+--   Color3      {"$type": "Color3", "rgb": [r, g, b]}  0-255
+--   UDim2       {"$type": "UDim2", "value": [xScale, xOffset, yScale, yOffset]}
+--   UDim        {"$type": "UDim", "value": [scale, offset]}
+--   Enum        {"$enum": "Material.Neon"}
+--   BrickColor  {"$type": "BrickColor", "name": "Bright red"}
+--   NumberRange {"$type": "NumberRange", "value": [min, max]}
+
+local PropertyDecoder = {}
+
+local MAX_STRING = 200000
+local MAX_MAGNITUDE = 1e7
+
+PropertyDecoder.SUPPORTED_TYPES = {
+	"number",
+	"string",
+	"boolean",
+	"Vector3",
+	"Vector2",
+	"CFrame",
+	"Color3",
+	"UDim2",
+	"UDim",
+	"Enum",
+	"BrickColor",
+	"NumberRange",
+}
+
+-- Properties the decoder never sets: Parent is assigned by the applier (last),
+-- Name comes from the node's `name` field.
+PropertyDecoder.BLOCKED_PROPERTIES = {
+	Parent = true,
+	Name = true,
+} :: { [string]: boolean }
+
+local function isFiniteNumber(value: any): boolean
+	return typeof(value) == "number" and value == value and math.abs(value) <= MAX_MAGNITUDE
+end
+
+-- Read a fixed-length array of finite numbers.
+local function numbers(value: any, count: number, label: string): ({ number }?, string?)
+	if typeof(value) ~= "table" then
+		return nil, label .. " must be an array of " .. tostring(count) .. " numbers"
+	end
+	if #value ~= count then
+		return nil, label .. " must have exactly " .. tostring(count) .. " numbers"
+	end
+	local out: { number } = {}
+	for i = 1, count do
+		if not isFiniteNumber(value[i]) then
+			return nil, label .. "[" .. tostring(i) .. "] is not a finite number"
+		end
+		out[i] = value[i]
+	end
+	return out, nil
+end
+
+local function decodeEnum(spec: any): (any, string?)
+	if typeof(spec) ~= "string" then
+		return nil, "$enum must be a string like 'Material.Neon'"
+	end
+	local enumName, itemName = (spec :: string):match("^([%a][%w]*)%.([%a][%w]*)$")
+	if enumName == nil or itemName == nil then
+		return nil, "malformed $enum: " .. spec
+	end
+	local ok, item = pcall(function()
+		return (Enum :: any)[enumName][itemName]
+	end)
+	if not ok or typeof(item) ~= "EnumItem" then
+		return nil, "unknown enum item: Enum." .. spec
+	end
+	return item, nil
+end
+
+-- Decode one encoded value. Returns (value, nil) or (nil, error message).
+function PropertyDecoder.decode(encoded: any): (any, string?)
+	local kind = typeof(encoded)
+	if kind == "number" then
+		if encoded ~= encoded then
+			return nil, "NaN is not allowed"
+		end
+		return encoded, nil
+	elseif kind == "boolean" then
+		return encoded, nil
+	elseif kind == "string" then
+		if #encoded > MAX_STRING then
+			return nil, "string value too long"
+		end
+		return encoded, nil
+	elseif kind ~= "table" then
+		return nil, "unsupported value of type " .. kind
+	end
+
+	if encoded["$enum"] ~= nil then
+		return decodeEnum(encoded["$enum"])
+	end
+
+	local tag = encoded["$type"]
+	if tag == "Vector3" then
+		local v, err = numbers(encoded.value, 3, "Vector3.value")
+		if v == nil then
+			return nil, err
+		end
+		return Vector3.new(v[1], v[2], v[3]), nil
+	elseif tag == "Vector2" then
+		local v, err = numbers(encoded.value, 2, "Vector2.value")
+		if v == nil then
+			return nil, err
+		end
+		return Vector2.new(v[1], v[2]), nil
+	elseif tag == "CFrame" then
+		local p, perr = numbers(encoded.position, 3, "CFrame.position")
+		if p == nil then
+			return nil, perr
+		end
+		local r: { number } = { 0, 0, 0 }
+		if encoded.rotation ~= nil then
+			local rotation, rerr = numbers(encoded.rotation, 3, "CFrame.rotation")
+			if rotation == nil then
+				return nil, rerr
+			end
+			r = rotation
+		end
+		-- Same convention as the Orientation property (Y, then X, then Z), degrees.
+		return CFrame.new(p[1], p[2], p[3]) * CFrame.fromOrientation(math.rad(r[1]), math.rad(r[2]), math.rad(r[3])), nil
+	elseif tag == "Color3" then
+		local c, err = numbers(encoded.rgb, 3, "Color3.rgb")
+		if c == nil then
+			return nil, err
+		end
+		for i = 1, 3 do
+			if c[i] < 0 or c[i] > 255 then
+				return nil, "Color3.rgb values must be 0-255"
+			end
+		end
+		return Color3.fromRGB(c[1], c[2], c[3]), nil
+	elseif tag == "UDim2" then
+		local u, err = numbers(encoded.value, 4, "UDim2.value")
+		if u == nil then
+			return nil, err
+		end
+		return UDim2.new(u[1], u[2], u[3], u[4]), nil
+	elseif tag == "UDim" then
+		local u, err = numbers(encoded.value, 2, "UDim.value")
+		if u == nil then
+			return nil, err
+		end
+		return UDim.new(u[1], u[2]), nil
+	elseif tag == "BrickColor" then
+		if typeof(encoded.name) ~= "string" then
+			return nil, "BrickColor.name must be a string"
+		end
+		local ok, color = pcall(function()
+			return BrickColor.new(encoded.name)
+		end)
+		if not ok then
+			return nil, "invalid BrickColor: " .. tostring(encoded.name)
+		end
+		return color, nil
+	elseif tag == "NumberRange" then
+		local n, err = numbers(encoded.value, 2, "NumberRange.value")
+		if n == nil then
+			return nil, err
+		end
+		if n[1] > n[2] then
+			return nil, "NumberRange min must be <= max"
+		end
+		return NumberRange.new(n[1], n[2]), nil
+	end
+
+	return nil, "unsupported value type: " .. tostring(tag)
+end
+
+-- Decode and assign one property. Returns nil on success or an error message.
+function PropertyDecoder.apply(instance: Instance, property: string, encoded: any): string?
+	if typeof(property) ~= "string" or property == "" then
+		return "property name must be a non-empty string"
+	end
+	if PropertyDecoder.BLOCKED_PROPERTIES[property] then
+		return "property '" .. property .. "' cannot be set by the server"
+	end
+	local value, err = PropertyDecoder.decode(encoded)
+	if err ~= nil then
+		return property .. ": " .. err
+	end
+	local ok, setErr = pcall(function()
+		(instance :: any)[property] = value
+	end)
+	if not ok then
+		return property .. ": " .. tostring(setErr)
+	end
+	return nil
+end
+
+-- Attribute values are limited to number / string / boolean (protocol).
+function PropertyDecoder.applyAttribute(instance: Instance, name: any, value: any): string?
+	if typeof(name) ~= "string" or name == "" then
+		return "attribute name must be a non-empty string"
+	end
+	local kind = typeof(value)
+	if kind ~= "number" and kind ~= "string" and kind ~= "boolean" then
+		return "attribute " .. name .. " must be a number, string or boolean"
+	end
+	local ok, err = pcall(function()
+		instance:SetAttribute(name, value)
+	end)
+	if not ok then
+		return "attribute " .. name .. ": " .. tostring(err)
+	end
+	return nil
+end
+
+return PropertyDecoder
+]]></ProtectedString>
+      </Properties>
+    </Item>
+    <Item class="ModuleScript" referent="RBX2B38DCC6E8AAC1855F80B1E8D13A4565">
+      <Properties>
+        <string name="Name">Theme</string>
+        <ProtectedString name="Source"><![CDATA[--!strict
+-- Theme: resolves Studio theme colors and notifies listeners when the theme changes.
+-- Every UI module asks Theme for colors instead of hard-coding them so the plugin
+-- stays readable in both the light and dark Studio themes.
+
+local Theme = {}
+
+type Listener = () -> ()
+
+local listeners: { Listener } = {}
+local connection: RBXScriptConnection? = nil
+
+local function studioTheme(): StudioTheme
+	return (settings() :: any).Studio.Theme
+end
+
+-- Look up a StudioStyleGuideColor, optionally with a modifier (Hover, Pressed, Disabled, Selected).
+function Theme.color(guide: Enum.StudioStyleGuideColor, modifier: Enum.StudioStyleGuideModifier?): Color3
+	local ok, result = pcall(function()
+		if modifier then
+			return studioTheme():GetColor(guide, modifier)
+		end
+		return studioTheme():GetColor(guide)
+	end)
+	if ok then
+		return result
+	end
+	return Color3.fromRGB(46, 46, 46)
+end
+
+-- Semantic colors used across the plugin.
+function Theme.background(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.MainBackground)
+end
+
+function Theme.panel(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.Titlebar)
+end
+
+function Theme.text(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.MainText)
+end
+
+function Theme.dimText(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.DimmedText)
+end
+
+function Theme.border(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.Border)
+end
+
+function Theme.inputBackground(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.InputFieldBackground)
+end
+
+function Theme.button(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.Button)
+end
+
+function Theme.buttonText(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.ButtonText)
+end
+
+function Theme.accent(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.DialogMainButton)
+end
+
+function Theme.accentText(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.DialogMainButtonText)
+end
+
+function Theme.userBubble(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.Item, Enum.StudioStyleGuideModifier.Selected)
+end
+
+function Theme.assistantBubble(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.Item)
+end
+
+function Theme.codeBackground(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.ScriptBackground)
+end
+
+function Theme.codeText(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.ScriptText)
+end
+
+function Theme.error(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.ErrorText)
+end
+
+function Theme.warning(): Color3
+	return Theme.color(Enum.StudioStyleGuideColor.WarningText)
+end
+
+function Theme.success(): Color3
+	-- Studio has no "success" guide color; ScriptBuiltInFunction is green-ish in both
+	-- default themes, but a fixed mid green reads well on light and dark backgrounds.
+	return Color3.fromRGB(46, 160, 67)
+end
+
+function Theme.danger(): Color3
+	return Color3.fromRGB(200, 40, 40)
+end
+
+-- Register a callback that re-applies colors. It runs immediately and on every
+-- Studio ThemeChanged. Returns a function that unregisters the callback (call it
+-- when the themed UI is destroyed so listeners do not leak).
+function Theme.bind(callback: Listener): () -> ()
+	table.insert(listeners, callback)
+	callback()
+	if connection == nil then
+		local ok, conn = pcall(function()
+			return (settings() :: any).Studio.ThemeChanged:Connect(function()
+				for _, listener in ipairs(table.clone(listeners)) do
+					task.spawn(listener)
+				end
+			end)
+		end)
+		if ok then
+			connection = conn
+		end
+	end
+	return function()
+		local index = table.find(listeners, callback)
+		if index then
+			table.remove(listeners, index)
+		end
+	end
+end
+
+-- Paint `property` of `instance` with `colorFn()` now and again whenever the Studio
+-- theme changes. Registrations are weak-keyed, so destroyed UI is not kept alive.
+local painted: { [Instance]: { [string]: () -> Color3 } } = setmetatable({}, { __mode = "k" }) :: any
+local paintBinding: (() -> ())? = nil
+
+local function repaintAll()
+	for instance, props in pairs(painted) do
+		for property, colorFn in pairs(props) do
+			pcall(function()
+				(instance :: any)[property] = colorFn()
+			end)
+		end
+	end
+end
+
+function Theme.paint(instance: Instance, property: string, colorFn: () -> Color3): ()
+	local props = painted[instance]
+	if props == nil then
+		local newProps: { [string]: () -> Color3 } = {}
+		painted[instance] = newProps
+		props = newProps
+		instance.Destroying:Connect(function()
+			painted[instance] = nil
+		end)
+	end
+	(props :: { [string]: () -> Color3 })[property] = colorFn;
+	(instance :: any)[property] = colorFn()
+	if paintBinding == nil then
+		paintBinding = Theme.bind(repaintAll)
+	end
+end
+
+function Theme.destroy(): ()
+	if connection then
+		connection:Disconnect()
+		connection = nil
+	end
+	table.clear(listeners)
+	table.clear(painted)
+	paintBinding = nil
+end
+
+return Theme
+]]></ProtectedString>
+      </Properties>
+    </Item>
+    <Item class="ModuleScript" referent="RBX8E902A4AA63D093C777074E3137BCE3F">
+      <Properties>
+        <string name="Name">Ui</string>
+        <ProtectedString name="Source"><![CDATA[--!strict
+-- Ui: tiny helpers for building themed Studio widgets declaratively.
+
+local Theme = require(script.Parent.Theme)
+
+local Ui = {}
+
+export type Props = { [string]: any }
+
+-- Create an instance, assign properties (Parent last), and parent any children.
+function Ui.create(className: string, props: Props?, children: { Instance }?): Instance
+	local instance = Instance.new(className)
+	local parent: Instance? = nil
+	if props then
+		for key, value in pairs(props) do
+			if key == "Parent" then
+				parent = value
+			else
+				(instance :: any)[key] = value
+			end
+		end
+	end
+	if children then
+		for _, child in ipairs(children) do
+			child.Parent = instance
+		end
+	end
+	if parent then
+		instance.Parent = parent
+	end
+	return instance
+end
+
+function Ui.corner(radius: number): Instance
+	return Ui.create("UICorner", { CornerRadius = UDim.new(0, radius) })
+end
+
+function Ui.padding(all: number): Instance
+	return Ui.create("UIPadding", {
+		PaddingTop = UDim.new(0, all),
+		PaddingBottom = UDim.new(0, all),
+		PaddingLeft = UDim.new(0, all),
+		PaddingRight = UDim.new(0, all),
+	})
+end
+
+function Ui.vlist(spacing: number): Instance
+	return Ui.create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Vertical,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, spacing),
+	})
+end
+
+function Ui.hlist(spacing: number): Instance
+	return Ui.create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, spacing),
+	})
+end
+
+function Ui.stroke(colorFn: () -> Color3): Instance
+	local stroke = Ui.create("UIStroke", { Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
+	Theme.paint(stroke, "Color", colorFn)
+	return stroke
+end
+
+-- A wrapped, auto-height label.
+function Ui.label(text: string, props: Props?): TextLabel
+	local label = Ui.create("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Font = Enum.Font.SourceSans,
+		TextSize = 15,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Text = text,
+	}) :: TextLabel
+	if props then
+		for key, value in pairs(props) do
+			(label :: any)[key] = value
+		end
+	end
+	if not (props and props.TextColor3) then
+		Theme.paint(label, "TextColor3", Theme.text)
+	end
+	return label
+end
+
+-- A themed push button. `primary` uses the dialog accent; `danger` uses red.
+function Ui.button(text: string, style: ("normal" | "primary" | "danger")?, width: number?): TextButton
+	local button = Ui.create("TextButton", {
+		Size = UDim2.new(0, width or 80, 0, 26),
+		AutoButtonColor = true,
+		Font = Enum.Font.SourceSansSemibold,
+		TextSize = 15,
+		Text = text,
+		BorderSizePixel = 0,
+	}, { Ui.corner(4) }) :: TextButton
+	if style == "primary" then
+		Theme.paint(button, "BackgroundColor3", Theme.accent)
+		Theme.paint(button, "TextColor3", Theme.accentText)
+	elseif style == "danger" then
+		Theme.paint(button, "BackgroundColor3", Theme.danger)
+		button.TextColor3 = Color3.new(1, 1, 1)
+	else
+		Theme.paint(button, "BackgroundColor3", Theme.button)
+		Theme.paint(button, "TextColor3", Theme.buttonText)
+	end
+	return button
+end
+
+-- A themed single-line (or multi-line) text box.
+function Ui.textBox(placeholder: string, multiLine: boolean?): TextBox
+	local box = Ui.create("TextBox", {
+		Size = UDim2.new(1, 0, 0, 26),
+		Font = Enum.Font.SourceSans,
+		TextSize = 15,
+		Text = "",
+		PlaceholderText = placeholder,
+		ClearTextOnFocus = false,
+		MultiLine = multiLine == true,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = if multiLine then Enum.TextYAlignment.Top else Enum.TextYAlignment.Center,
+		BorderSizePixel = 0,
+	}, { Ui.corner(4), Ui.padding(4) }) :: TextBox
+	Theme.paint(box, "BackgroundColor3", Theme.inputBackground)
+	Theme.paint(box, "TextColor3", Theme.text)
+	Theme.paint(box, "PlaceholderColor3", Theme.dimText)
+	Ui.stroke(Theme.border).Parent = box
+	return box
+end
+
+-- A read-only, selectable monospace block (users can select and copy the text).
+function Ui.codeBlock(code: string, maxLines: number?): Frame
+	local text = code
+	local truncated = false
+	if maxLines then
+		local lines = string.split(code, "\n")
+		if #lines > maxLines then
+			text = table.concat(lines, "\n", 1, maxLines)
+			truncated = true
+		end
+	end
+	local frame = Ui.create("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BorderSizePixel = 0,
+	}, { Ui.corner(4), Ui.padding(6), Ui.vlist(2) }) :: Frame
+	Theme.paint(frame, "BackgroundColor3", Theme.codeBackground)
+	local box = Ui.create("TextBox", {
+		Name = "Code",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Font = Enum.Font.RobotoMono,
+		TextSize = 13,
+		TextWrapped = true,
+		MultiLine = true,
+		ClearTextOnFocus = false,
+		TextEditable = false,
+		RichText = false,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Text = text,
+		LayoutOrder = 1,
+		Parent = frame,
+	})
+	Theme.paint(box, "TextColor3", Theme.codeText)
+	if truncated then
+		local note = Ui.label("... (" .. tostring(#string.split(code, "\n") - (maxLines :: number)) .. " more lines)", {
+			TextSize = 13,
+			LayoutOrder = 2,
+			TextColor3 = Theme.dimText(),
+		})
+		Theme.paint(note, "TextColor3", Theme.dimText)
+		note.Parent = frame
+	end
+	return frame
+end
+
+return Ui
+]]></ProtectedString>
+      </Properties>
+    </Item>
+  </Item>
+</roblox>
