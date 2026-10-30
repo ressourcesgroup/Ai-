@@ -1,0 +1,50 @@
+nano-dense seed=0 val_loss=0.5007 time=83.1s
+nano-dense seed=1 val_loss=0.4809 time=100.1s
+nano-dense seed=2 val_loss=0.4895 time=50.7s
+nano-moe seed=0 val_loss=0.4867 time=59.9s
+nano-moe seed=1 val_loss=0.482 time=68.4s
+nano-moe seed=2 val_loss=0.5052 time=60.1s
+nano-recurrent seed=0 val_loss=0.5102 time=49.0s
+nano-recurrent seed=1 val_loss=0.5239 time=49.9s
+nano-recurrent seed=2 val_loss=0.5011 time=49.8s
+{
+  "summary": {
+    "nano-dense": {
+      "val_loss_mean": 0.4904,
+      "val_loss_std": 0.0081,
+      "wall_time_mean_s": 78.0,
+      "params_total": 1938624,
+      "params_active": 1938624
+    },
+    "nano-moe": {
+      "val_loss_mean": 0.4913,
+      "val_loss_std": 0.01,
+      "wall_time_mean_s": 62.8,
+      "params_total": 2529984,
+      "params_active": 1940160
+    },
+    "nano-recurrent": {
+      "val_loss_mean": 0.5117,
+      "val_loss_std": 0.0094,
+      "wall_time_mean_s": 49.6,
+      "params_total": 1126848,
+      "params_active": 1126848
+    }
+  },
+  "gates": {
+    "nano-moe": {
+      "promote": false,
+      "reasons": [
+        "val_loss: gain -0.0009 vs noise 0.0091 -> not significant",
+        "guard wall_time_s: ok (+15.1667)"
+      ]
+    },
+    "nano-recurrent": {
+      "promote": false,
+      "reasons": [
+        "val_loss: gain -0.0214 vs noise 0.0138 -> not significant",
+        "guard wall_time_s: ok (+28.4000)"
+      ]
+    }
+  }
+}

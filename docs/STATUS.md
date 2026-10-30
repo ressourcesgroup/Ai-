@@ -42,4 +42,4 @@ All on CPU (4 cores), nano scale. These measure the pipeline, not useful capabil
 | `build-data` | 616 docs in → 327 kept (289 near-duplicate synthetic samples removed) → 51,308 train / 6,510 val tokens, vocab 1,640, 3.89 chars/token |
 | `train` nano-dense (1.94M params, 400 steps) | val loss 7.28 → 0.506; train 0.17 (overfitting) |
 | GRIB-v0-static, nano-dense | **0 / 14 (0%)**; reference oracle 14/14; empty answer 0/14 |
-| exp001 dense vs MoE vs recurrent | see `experiments/exp001/README.md` |
+| exp001 (3 seeds, 300 steps) | dense 0.490±0.008 · MoE 0.491±0.010 (no difference) · recurrent 0.512±0.009 (worse, 58% params). Gate promoted neither. [details](../experiments/exp001/README.md) |
