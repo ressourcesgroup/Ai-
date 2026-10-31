@@ -33,7 +33,7 @@ def test_generated_module_is_current_and_valid():
 
 
 def test_every_offline_response_is_verified():
-    assert len(ENTRIES) == 29
+    assert len(ENTRIES) == 30
     for e in ENTRIES:
         r = e["response"]
         assert r["source"].startswith("offline:tool:")
@@ -66,6 +66,11 @@ def test_matcher_routes_common_requests():
         "animación de saltar": "anim_jump",
         "construye una torre": "tower",
         "fais une voiture": "car",
+        # GUI designer (real ScreenGui, no scripts) vs scripted HUD
+        "make a main menu gui": "gui",
+        "crée une interface de boutique": "gui",
+        "haz una tienda con botones": "gui",
+        "make a working hud script": "ui_hud",
     }
     for message, key in cases.items():
         got = match(message)

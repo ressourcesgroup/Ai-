@@ -11,7 +11,7 @@ import re
 
 from godmode.anim import PROVENANCE, generate as generate_animation, list_styles, player_script, validate as validate_animation
 
-from . import builders, scripts
+from . import builders, gui, scripts
 from .base import ToolError, ToolOutput, create_script, delete_instance, edit_script, verify_actions, verify_source
 from .router import ROUTER_NAME, TOOL_THRESHOLD, Intent, route
 
@@ -88,6 +88,7 @@ TOOLS = {
     "leaderstats": scripts.leaderstats,
     "datastore": scripts.datastore,
     "ui_hud": scripts.ui_hud,
+    "gui": gui.gui_design,
     "npc_patrol": scripts.npc_patrol,
     "tween_door": scripts.tween_door,
     "moving_platform": scripts.moving_platform,
