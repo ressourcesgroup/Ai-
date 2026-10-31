@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from ..luau import check_structure, lint
+from ..luau import check_structure, lint, tokenize
 
 Adapter = Callable[[str], str]
 
@@ -63,6 +63,36 @@ def extract_code(response: str) -> str:
     return "\n".join(blocks) if blocks else response
 
 
+def strip_comments(code: str) -> str:
+    """Replace every Luau comment with the newlines it contained.
+
+    Pattern checks must not be satisfiable by writing the expected API name in
+    a comment (`-- uses task.wait`). Line numbers are preserved so `^`/`$`
+    anchored patterns still line up. `--!strict`-style directives are kept:
+    they change how the code is type-checked. Falls back to the raw code when the code
+    does not tokenize (the structure check reports that separately).
+    """
+    try:
+        tokens = tokenize(code, keep_comments=True)
+    except Exception:
+        return code
+    out: list[str] = []
+    cursor = 0
+    for tok in tokens:
+        if tok.kind == "eof":
+            break
+        start = code.find(tok.value, cursor)
+        if start < 0 or code[cursor:start].strip():
+            return code  # token values are not verbatim source slices; be safe
+        end = start + len(tok.value)
+        out.append(code[cursor:start])
+        stripped = tok.kind == "comment" and not tok.value.startswith("--!")
+        out.append("\n" * tok.value.count("\n") if stripped else tok.value)
+        cursor = end
+    out.append(code[cursor:])
+    return "".join(out)
+
+
 def run_check(code: str, check: dict) -> tuple[bool, str]:
     kind = check["type"]
     if kind == "structure":
@@ -74,9 +104,9 @@ def run_check(code: str, check: dict) -> tuple[bool, str]:
         bad = [f for f in lint(code) if f.rule != "GM000" and (not rules or f.rule in rules)]
         return not bad, "lint: " + ", ".join(f"{f.rule}@{f.line}" for f in bad)
     if kind == "contains":
-        return re.search(check["pattern"], code, re.M) is not None, f"missing /{check['pattern']}/"
+        return re.search(check["pattern"], strip_comments(code), re.M) is not None, f"missing /{check['pattern']}/"
     if kind == "not_contains":
-        return re.search(check["pattern"], code, re.M) is None, f"forbidden /{check['pattern']}/"
+        return re.search(check["pattern"], strip_comments(code), re.M) is None, f"forbidden /{check['pattern']}/"
     raise ValueError(f"unknown check type {kind!r}")
 
 
@@ -143,26 +173,72 @@ def _ngrams(text: str, n: int) -> set[str]:
 
 
 CONTAMINATION_THRESHOLD = 0.05
+# Short n-grams catch templated answers that reword or reorder a training
+# document just enough to dodge 13-gram matches. Common Roblox boilerplate
+# (`local Players = game:GetService("Players")`) is also 8+ words long, so the
+# short signal needs a much higher bar before it counts as contamination.
+SHORT_NGRAM = 8
+SHORT_NGRAM_THRESHOLD = 0.3
 
 
 def contaminated_ids(report: dict[str, float], threshold: float = CONTAMINATION_THRESHOLD) -> set[str]:
+    """Task ids whose contamination score is strictly above `threshold`."""
     return {k for k, v in report.items() if v > threshold}
 
 
-def contamination_report(tasks: list[Task], training_texts: list[str], n: int = 13) -> dict[str, float]:
-    """Fraction of each task's reference n-grams that appear in training data.
-
-    Any nonzero value means the task may be memorized and should be rotated
-    out or the overlapping training documents removed.
-    """
-    train_grams: set[str] = set()
+def contamination_signals(
+    tasks: list[Task], training_texts: list[str], n: int = 13, short_n: int = SHORT_NGRAM
+) -> dict[str, dict[str, float]]:
+    """Raw per-task overlap fractions for the long (`n`) and short (`short_n`) n-gram signals."""
+    long_train: set[str] = set()
+    short_train: set[str] = set()
     for t in training_texts:
-        train_grams |= _ngrams(t, n)
-    report = {}
-    for task in tasks:
-        grams = _ngrams(task.reference, n)
-        report[task.id] = round(len(grams & train_grams) / len(grams), 4) if grams else 0.0
-    return report
+        long_train |= _ngrams(t, n)
+        short_train |= _ngrams(t, short_n)
+
+    def frac(grams: set[str], train: set[str]) -> float:
+        return round(len(grams & train) / len(grams), 4) if grams else 0.0
+
+    return {
+        task.id: {
+            "long": frac(_ngrams(task.reference, n), long_train),
+            "short": frac(_ngrams(task.reference, short_n), short_train),
+        }
+        for task in tasks
+    }
+
+
+def contamination_report(
+    tasks: list[Task], training_texts: list[str], n: int = 13, short_n: int | None = SHORT_NGRAM
+) -> dict[str, float]:
+    """Per-task contamination score in [0, 1], on the `n`-gram (default 13) scale.
+
+    The base score is the fraction of the task reference's `n`-grams that also
+    appear in the training texts. Small nonzero values are expected from shared
+    Roblox boilerplate; `contaminated_ids` flags a task only when its score is
+    above CONTAMINATION_THRESHOLD (5%), and such tasks are excluded from
+    `pass_rate_clean`.
+
+    When `short_n` is set (default 8), a second signal catches templated
+    answers: the fraction of `short_n`-grams found in training is rescaled so
+    that SHORT_NGRAM_THRESHOLD maps onto CONTAMINATION_THRESHOLD, and the score
+    is the larger of the two signals. Pass `short_n=None` for the pure
+    `n`-gram fraction. Use `contamination_signals` to see both raw values.
+    """
+    if short_n is None:
+        train_grams: set[str] = set()
+        for t in training_texts:
+            train_grams |= _ngrams(t, n)
+        report = {}
+        for task in tasks:
+            grams = _ngrams(task.reference, n)
+            report[task.id] = round(len(grams & train_grams) / len(grams), 4) if grams else 0.0
+        return report
+    scale = CONTAMINATION_THRESHOLD / SHORT_NGRAM_THRESHOLD
+    return {
+        tid: round(max(sig["long"], sig["short"] * scale), 4)
+        for tid, sig in contamination_signals(tasks, training_texts, n, short_n).items()
+    }
 
 
 # ---- built-in adapters -------------------------------------------------

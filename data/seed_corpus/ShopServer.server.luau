@@ -1,7 +1,10 @@
 --!strict
--- Server-authoritative shop. The client only names an item; the server owns prices.
+-- Server-authoritative shop. The client only names an item; the server owns
+-- prices and coins. Everything that can fail is resolved BEFORE charging, so a
+-- missing template or backpack never costs the player coins.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 
 local RateLimiter = require(script.Parent.RateLimiter)
 
@@ -11,17 +14,21 @@ local PRICES: { [string]: number } = {
 	SpeedPotion = 25,
 }
 
+-- PlayerData.server owns coin balances; leaderstats only mirrors them.
+local playerDataApi = ServerStorage:WaitForChild("PlayerDataApi")
+local spendCoins = playerDataApi:WaitForChild("SpendCoins") :: BindableFunction
+
 local purchaseRemote = Instance.new("RemoteFunction")
 purchaseRemote.Name = "PurchaseItem"
 purchaseRemote.Parent = ReplicatedStorage
 
 local limiter = RateLimiter.new(5, 1)
 
-local function getCoins(player: Player): IntValue?
-	local stats = player:FindFirstChild("leaderstats")
-	local coins = stats and stats:FindFirstChild("Coins")
-	if coins and coins:IsA("IntValue") then
-		return coins
+local function findTemplate(itemName: string): Tool?
+	local items = ReplicatedStorage:FindFirstChild("Items")
+	local template = items and items:FindFirstChild(itemName)
+	if template and template:IsA("Tool") then
+		return template
 	end
 	return nil
 end
@@ -37,15 +44,17 @@ purchaseRemote.OnServerInvoke = function(player: Player, itemName: unknown)
 	if price == nil then
 		return false, "Unknown item"
 	end
-	local coins = getCoins(player)
-	if not coins or coins.Value < price then
+	local template = findTemplate(itemName)
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if not template or not backpack then
+		return false, "Item unavailable"
+	end
+	local item = template:Clone()
+	-- SpendCoins checks and deducts the balance atomically on the server.
+	if not spendCoins:Invoke(player, price) then
+		item:Destroy()
 		return false, "Not enough coins"
 	end
-	coins.Value -= price
-	local backpack = player:FindFirstChildOfClass("Backpack")
-	local template = ReplicatedStorage:FindFirstChild("Items") and ReplicatedStorage.Items:FindFirstChild(itemName)
-	if backpack and template then
-		template:Clone().Parent = backpack
-	end
+	item.Parent = backpack
 	return true, itemName
 end

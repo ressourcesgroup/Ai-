@@ -21,8 +21,15 @@ function Inventory.count(inv: Inventory, id: string): number
 	return total
 end
 
--- Returns how many items could not be added.
+-- Amounts must be positive whole numbers. Rejects 0, negatives, fractions,
+-- NaN and infinity, which would otherwise corrupt stack counts.
+local function isValidAmount(amount: number): boolean
+	return type(amount) == "number" and amount > 0 and amount < math.huge and amount == math.floor(amount)
+end
+
+-- Returns how many items could not be added. Errors on an invalid amount.
 function Inventory.add(inv: Inventory, id: string, amount: number): number
+	assert(isValidAmount(amount), "amount must be a positive integer")
 	local remaining = amount
 	for i = 1, inv.capacity do
 		local stack = inv.slots[i]
@@ -48,8 +55,9 @@ function Inventory.add(inv: Inventory, id: string, amount: number): number
 	return remaining
 end
 
+-- Returns false (and changes nothing) for an invalid amount or too few items.
 function Inventory.remove(inv: Inventory, id: string, amount: number): boolean
-	if Inventory.count(inv, id) < amount then
+	if not isValidAmount(amount) or Inventory.count(inv, id) < amount then
 		return false
 	end
 	local remaining = amount

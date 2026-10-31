@@ -1,5 +1,7 @@
 --!strict
 -- Procedural island heightmap using layered Perlin noise and Terrain:FillBlock.
+-- Water is filled FIRST so the land columns written afterwards replace it;
+-- filling water last would overwrite the sand and grass bases below sea level.
 
 local Terrain = workspace.Terrain
 
@@ -8,6 +10,7 @@ local CELL = 4
 local HEIGHT = 40
 local OCTAVES = 4
 local SEED = 1337
+local SEA_LEVEL = 4
 
 local function fractalNoise(x: number, z: number): number
 	local amplitude, frequency, total, norm = 1, 1 / 48, 0, 0
@@ -26,6 +29,13 @@ local function islandMask(x: number, z: number): number
 	return math.clamp(1 - math.sqrt(dx * dx + dz * dz), 0, 1)
 end
 
+local worldSize = SIZE * CELL
+Terrain:FillBlock(
+	CFrame.new(worldSize / 2, SEA_LEVEL / 2, worldSize / 2),
+	Vector3.new(worldSize * 2, SEA_LEVEL, worldSize * 2),
+	Enum.Material.Water
+)
+
 for x = 0, SIZE - 1 do
 	for z = 0, SIZE - 1 do
 		local h = (fractalNoise(x, z) * 0.5 + 0.5) * islandMask(x, z) * HEIGHT
@@ -41,4 +51,3 @@ for x = 0, SIZE - 1 do
 	end
 end
 
-Terrain:FillBlock(CFrame.new(SIZE * CELL / 2, 2, SIZE * CELL / 2), Vector3.new(SIZE * CELL * 2, 4, SIZE * CELL * 2), Enum.Material.Water)

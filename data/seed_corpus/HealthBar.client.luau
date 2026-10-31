@@ -10,7 +10,6 @@ local TWEEN_INFO = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirecti
 local gui = Instance.new("ScreenGui")
 gui.Name = "HealthGui"
 gui.ResetOnSpawn = false
-gui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
 frame.AnchorPoint = Vector2.new(0.5, 1)
@@ -29,18 +28,33 @@ fill.BackgroundColor3 = Color3.fromRGB(80, 220, 100)
 fill.Parent = frame
 corner:Clone().Parent = fill
 
+-- Connections that belong to the current character; dropped on respawn.
+local characterConnections: { RBXScriptConnection } = {}
+
 local function bind(character: Model)
+	for _, connection in characterConnections do
+		connection:Disconnect()
+	end
+	table.clear(characterConnections)
+
 	local humanoid = character:WaitForChild("Humanoid") :: Humanoid
+	if player.Character ~= character then
+		return -- respawned again while we waited
+	end
 	local function update()
-		local ratio = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+		local ratio = math.clamp(humanoid.Health / math.max(humanoid.MaxHealth, 1), 0, 1)
 		TweenService:Create(fill, TWEEN_INFO, { Size = UDim2.fromScale(ratio, 1) }):Play()
 		fill.BackgroundColor3 = Color3.fromRGB(220, 60, 60):Lerp(Color3.fromRGB(80, 220, 100), ratio)
 	end
-	humanoid.HealthChanged:Connect(update)
+	table.insert(characterConnections, humanoid.HealthChanged:Connect(update))
+	table.insert(characterConnections, humanoid:GetPropertyChangedSignal("MaxHealth"):Connect(update))
 	update()
 end
 
-if player.Character then
-	bind(player.Character)
-end
+-- Connect before anything yields (WaitForChild below) so no spawn is missed.
 player.CharacterAdded:Connect(bind)
+if player.Character then
+	task.spawn(bind, player.Character)
+end
+
+gui.Parent = player:WaitForChild("PlayerGui")

@@ -1,5 +1,7 @@
 --!strict
 -- Maid: tracks cleanup tasks so systems never leak connections or instances.
+-- Tasks are cleaned in reverse order; each runs in pcall so a failure is
+-- reported without skipping the remaining tasks.
 
 type Task = RBXScriptConnection | Instance | thread | () -> () | { Destroy: (any) -> () }
 
@@ -23,7 +25,9 @@ local function cleanup(item: Task)
 	elseif typeof(item) == "Instance" then
 		item:Destroy()
 	elseif typeof(item) == "thread" then
-		if coroutine.status(item) ~= "dead" then
+		-- Cancelling the running thread (a task that cleans its own maid)
+		-- would abort the rest of the cleanup, so skip it.
+		if item ~= coroutine.running() and coroutine.status(item) ~= "dead" then
 			task.cancel(item)
 		end
 	elseif typeof(item) == "function" then
@@ -37,7 +41,11 @@ function Maid.Clean(self: Maid)
 	local tasks = self._tasks
 	self._tasks = {}
 	for index = #tasks, 1, -1 do
-		cleanup(tasks[index])
+		-- One failing task must not stop the others from being cleaned up.
+		local ok, err = pcall(cleanup, tasks[index])
+		if not ok then
+			warn(`Maid task {index} failed to clean up: {err}`)
+		end
 	end
 end
 

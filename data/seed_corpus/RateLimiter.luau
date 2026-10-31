@@ -12,6 +12,7 @@ export type RateLimiter = typeof(setmetatable({} :: {
 	_capacity: number,
 	_refillPerSecond: number,
 	_buckets: { [Player]: Bucket },
+	_removingConnection: RBXScriptConnection?,
 }, RateLimiter))
 
 function RateLimiter.new(capacity: number, refillPerSecond: number): RateLimiter
@@ -21,8 +22,11 @@ function RateLimiter.new(capacity: number, refillPerSecond: number): RateLimiter
 		_capacity = capacity,
 		_refillPerSecond = refillPerSecond,
 		_buckets = {},
+		_removingConnection = nil :: RBXScriptConnection?,
 	}, RateLimiter)
-	Players.PlayerRemoving:Connect(function(player)
+	-- Stored so Destroy can disconnect it; otherwise every limiter ever
+	-- created would stay alive through this connection.
+	self._removingConnection = Players.PlayerRemoving:Connect(function(player)
 		self._buckets[player] = nil
 	end)
 	return self
@@ -44,6 +48,15 @@ function RateLimiter.Allow(self: RateLimiter, player: Player, cost: number?): bo
 	end
 	bucket.tokens -= price
 	return true
+end
+
+function RateLimiter.Destroy(self: RateLimiter)
+	local connection = self._removingConnection
+	if connection then
+		connection:Disconnect()
+		self._removingConnection = nil
+	end
+	table.clear(self._buckets)
 end
 
 return RateLimiter

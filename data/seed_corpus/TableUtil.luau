@@ -37,15 +37,26 @@ function TableUtil.keys<K, V>(dict: { [K]: V }): { K }
 	return out
 end
 
-function TableUtil.deepCopy<T>(value: T): T
+-- Copies nested tables (keys and values) and keeps metatables. Cycles and
+-- shared references are preserved: each source table is copied exactly once.
+local function deepCopyInto(value: any, seen: { [any]: any }): any
 	if type(value) ~= "table" then
 		return value
 	end
-	local copy = {}
-	for k, v in value :: any do
-		copy[TableUtil.deepCopy(k)] = TableUtil.deepCopy(v)
+	local existing = seen[value]
+	if existing then
+		return existing
 	end
-	return setmetatable(copy, getmetatable(value :: any)) :: any
+	local copy = {}
+	seen[value] = copy
+	for k, v in value do
+		copy[deepCopyInto(k, seen)] = deepCopyInto(v, seen)
+	end
+	return setmetatable(copy, getmetatable(value))
+end
+
+function TableUtil.deepCopy<T>(value: T): T
+	return deepCopyInto(value, {})
 end
 
 function TableUtil.shuffle<T>(list: { T }, rng: Random?): { T }
