@@ -154,9 +154,20 @@ def cmd_sft(args) -> None:
     from .data.script_families import FAMILIES, HELD_OUT_FAMILIES, generate
     from .train.sft import SFTConfig, run_sft
 
+    langs = tuple(args.langs.split(","))
     train_fams = [f for f in FAMILIES if f not in HELD_OUT_FAMILIES]
-    samples, rejected = generate(args.per_family, seed=args.seed, families=train_fams)
-    held, _ = generate(max(4, args.per_family // 4), seed=args.seed + 1000, families=list(HELD_OUT_FAMILIES))
+    samples, rejected = generate(args.per_family, seed=args.seed, families=train_fams, langs=langs)
+    held, _ = generate(max(4, args.per_family // 4), seed=args.seed + 1000, families=list(HELD_OUT_FAMILIES),
+                       langs=langs)
+    if args.compose:
+        # compositional trigger x effect programs: the model has to assemble code, not recall one template
+        from .data import compose
+        c_train, c_rej = compose.generate(args.compose, seed=args.seed + 7)
+        c_held, _ = compose.generate(max(60, args.compose // 20), seed=args.seed + 2000, split="heldout")
+        samples += c_train
+        held += c_held
+        rejected += c_rej
+        print(f"compose: {len(c_train)} train programs, {len(c_held)} held-out trigger/effect pairs")
     rng = _random.Random(args.seed)
     rng.shuffle(samples)
     n_val = max(16, len(samples) // 20)
@@ -305,6 +316,8 @@ def main(argv: list[str] | None = None) -> None:
     sf.add_argument("--eval-every", type=int, default=100)
     sf.add_argument("--threads", type=int, default=0)
     sf.add_argument("--seed", type=int, default=0)
+    sf.add_argument("--langs", default="en", help="prompt languages for the family data, e.g. en,fr,es")
+    sf.add_argument("--compose", type=int, default=0, help="add N compositional trigger+effect programs")
     sf.set_defaults(fn=cmd_sft)
 
     r = sub.add_parser("grib", help="run the GRIB benchmark")

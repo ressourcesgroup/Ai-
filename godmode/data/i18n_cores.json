@@ -1,0 +1,1636 @@
+{
+ "lava that kills you": {
+  "fr": [
+   "de la lave qui te tue",
+   "de la lave mortelle"
+  ],
+  "es": [
+   "lava que te mata",
+   "lava mortal"
+  ]
+ },
+ "a damage brick that deals {0} damage": {
+  "fr": [
+   "une brique qui fait {0} dégâts"
+  ],
+  "es": [
+   "un bloque que hace {0} de daño"
+  ]
+ },
+ "a part that kills the player when touched": {
+  "fr": [
+   "une part qui tue le joueur quand il la touche",
+   "une brique qui tue au toucher"
+  ],
+  "es": [
+   "una parte que mata al jugador al tocarla",
+   "un bloque que mata al tocarlo"
+  ]
+ },
+ "lava that hurts players for {0} damage": {
+  "fr": [
+   "de la lave qui fait {0} dégâts aux joueurs"
+  ],
+  "es": [
+   "lava que hace {0} de daño a los jugadores"
+  ]
+ },
+ "a part that does {0} damage when touched": {
+  "fr": [
+   "une part qui fait {0} dégâts quand on la touche"
+  ],
+  "es": [
+   "una parte que hace {0} de daño al tocarla"
+  ]
+ },
+ "a death brick": {
+  "fr": [
+   "une brique mortelle",
+   "un kill brick"
+  ],
+  "es": [
+   "un bloque mortal",
+   "un kill brick"
+  ]
+ },
+ "a part called KillBrick that kills players": {
+  "fr": [
+   "une part appelée KillBrick qui tue les joueurs"
+  ],
+  "es": [
+   "una parte llamada KillBrick que mata a los jugadores"
+  ]
+ },
+ "a {0} kill part": {
+  "fr": [
+   "une part {0} qui tue"
+  ],
+  "es": [
+   "una parte {0} que mata"
+  ]
+ },
+ "a part called LavaFloor that kills players": {
+  "fr": [
+   "une part appelée LavaFloor qui tue les joueurs"
+  ],
+  "es": [
+   "una parte llamada LavaFloor que mata a los jugadores"
+  ]
+ },
+ "a part called Lava that kills players": {
+  "fr": [
+   "une part appelée Lava qui tue les joueurs"
+  ],
+  "es": [
+   "una parte llamada Lava que mata a los jugadores"
+  ]
+ },
+ "a part called Spikes that kills players": {
+  "fr": [
+   "une part appelée Spikes qui tue les joueurs"
+  ],
+  "es": [
+   "una parte llamada Spikes que mata a los jugadores"
+  ]
+ },
+ "a part called AcidPool that kills players": {
+  "fr": [
+   "une part appelée AcidPool qui tue les joueurs"
+  ],
+  "es": [
+   "una parte llamada AcidPool que mata a los jugadores"
+  ]
+ },
+ "a kill brick": {
+  "fr": [
+   "une brique qui tue",
+   "un kill brick"
+  ],
+  "es": [
+   "una parte que mata",
+   "un kill brick"
+  ]
+ },
+ "a part called DeathPart that kills players": {
+  "fr": [
+   "une part appelée DeathPart qui tue les joueurs"
+  ],
+  "es": [
+   "una parte llamada DeathPart que mata a los jugadores"
+  ]
+ },
+ "spawn {0} {1} players can collect": {
+  "fr": [
+   "faire apparaître {0} {1} que les joueurs peuvent ramasser"
+  ],
+  "es": [
+   "generar {0} {1} que los jugadores puedan recoger"
+  ]
+ },
+ "{0} that give {1} {2} when you touch them": {
+  "fr": [
+   "des {0} qui donnent {1} {2} quand on les touche"
+  ],
+  "es": [
+   "{0} que dan {1} {2} al tocarlos"
+  ]
+ },
+ "{0} collectible {1}": {
+  "fr": [
+   "{0} {1} à ramasser"
+  ],
+  "es": [
+   "{0} {1} coleccionables"
+  ]
+ },
+ "collectable {0} worth {1} that respawn after {2} seconds": {
+  "fr": [
+   "des {0} à ramasser qui valent {1} et réapparaissent après {2} secondes"
+  ],
+  "es": [
+   "{0} coleccionables que valen {1} y reaparecen después de {2} segundos"
+  ]
+ },
+ "a coin pickup that gives {0}": {
+  "fr": [
+   "une pièce à ramasser qui donne {0}"
+  ],
+  "es": [
+   "una moneda para recoger que da {0}"
+  ]
+ },
+ "a {0} teleporter": {
+  "fr": [
+   "un téléporteur {0}"
+  ],
+  "es": [
+   "un teletransportador {0}"
+  ]
+ },
+ "teleport parts": {
+  "fr": [
+   "des parts de téléportation"
+  ],
+  "es": [
+   "partes de teletransporte"
+  ]
+ },
+ "a portal that teleports the player": {
+  "fr": [
+   "un portail qui téléporte le joueur"
+  ],
+  "es": [
+   "un portal que teletransporta al jugador"
+  ]
+ },
+ "a teleporter": {
+  "fr": [
+   "un téléporteur"
+  ],
+  "es": [
+   "un teletransportador",
+   "un teleport"
+  ]
+ },
+ "two teleport pads": {
+  "fr": [
+   "deux pads de téléportation"
+  ],
+  "es": [
+   "dos plataformas de teletransporte"
+  ]
+ },
+ "a teleport pad that sends you to another pad": {
+  "fr": [
+   "un pad de téléportation qui t'envoie vers un autre pad"
+  ],
+  "es": [
+   "una plataforma de teletransporte que te lleva a otra"
+  ]
+ },
+ "a sprint with stamina": {
+  "fr": [
+   "un sprint avec de l'endurance",
+   "un sprint avec stamina"
+  ],
+  "es": [
+   "un sprint con estamina"
+  ]
+ },
+ "a shift to sprint system with speed {0}": {
+  "fr": [
+   "un système de sprint avec shift à la vitesse {0}"
+  ],
+  "es": [
+   "un sistema de correr con shift con velocidad {0}"
+  ]
+ },
+ "sprinting when holding shift": {
+  "fr": [
+   "courir en maintenant shift"
+  ],
+  "es": [
+   "correr al mantener shift"
+  ]
+ },
+ "make the player run faster when holding shift": {
+  "fr": [
+   "faire courir le joueur plus vite quand il maintient shift"
+  ],
+  "es": [
+   "que el jugador corra más rápido al mantener shift"
+  ]
+ },
+ "a sprint script with {0}": {
+  "fr": [
+   "un script de sprint avec {0}"
+  ],
+  "es": [
+   "un script de sprint con {0}"
+  ]
+ },
+ "a sprint button": {
+  "fr": [
+   "un bouton pour sprinter"
+  ],
+  "es": [
+   "un botón para correr"
+  ]
+ },
+ "run when you hold {0}": {
+  "fr": [
+   "courir quand on maintient {0}"
+  ],
+  "es": [
+   "correr al mantener {0}"
+  ]
+ },
+ "double jump": {
+  "fr": [
+   "double saut",
+   "un double jump"
+  ],
+  "es": [
+   "doble salto"
+  ]
+ },
+ "air jump": {
+  "fr": [
+   "saut en l'air"
+  ],
+  "es": [
+   "salto en el aire"
+  ]
+ },
+ "let players jump {0} times in the air": {
+  "fr": [
+   "permettre aux joueurs de sauter {0} fois en l'air"
+  ],
+  "es": [
+   "que los jugadores puedan saltar {0} veces en el aire"
+  ]
+ },
+ "a multi jump": {
+  "fr": [
+   "un multi saut"
+  ],
+  "es": [
+   "un salto múltiple"
+  ]
+ },
+ "jump twice": {
+  "fr": [
+   "sauter deux fois"
+  ],
+  "es": [
+   "saltar dos veces"
+  ]
+ },
+ "a double jump script": {
+  "fr": [
+   "un script de double saut"
+  ],
+  "es": [
+   "un script de doble salto"
+  ]
+ },
+ "a day night cycle": {
+  "fr": [
+   "un cycle jour nuit"
+  ],
+  "es": [
+   "un ciclo de día y noche"
+  ]
+ },
+ "a day/night cycle script": {
+  "fr": [
+   "un script de cycle jour/nuit"
+  ],
+  "es": [
+   "un script de ciclo día/noche"
+  ]
+ },
+ "make time pass in the game": {
+  "fr": [
+   "faire passer le temps dans le jeu"
+  ],
+  "es": [
+   "hacer que pase el tiempo en el juego"
+  ]
+ },
+ "a {0} minute day cycle": {
+  "fr": [
+   "un cycle jour de {0} minutes"
+  ],
+  "es": [
+   "un ciclo de día de {0} minutos"
+  ]
+ },
+ "day and night that lasts {0} minutes": {
+  "fr": [
+   "un jour et une nuit qui durent {0} minutes"
+  ],
+  "es": [
+   "día y noche que duran {0} minutos"
+  ]
+ },
+ "an intermission and round loop": {
+  "fr": [
+   "une boucle d'intermission et de rounds"
+  ],
+  "es": [
+   "un bucle de intermedio y rondas"
+  ]
+ },
+ "a round system": {
+  "fr": [
+   "un système de rounds",
+   "un système de manches"
+  ],
+  "es": [
+   "un sistema de rondas"
+  ]
+ },
+ "a minigame round system that teleports players": {
+  "fr": [
+   "un système de rounds de minijeux qui téléporte les joueurs"
+  ],
+  "es": [
+   "un sistema de rondas de minijuegos que teletransporta a los jugadores"
+  ]
+ },
+ "a game loop with {0} second rounds": {
+  "fr": [
+   "une boucle de jeu avec des rounds de {0} secondes"
+  ],
+  "es": [
+   "un bucle de juego con rondas de {0} segundos"
+  ]
+ },
+ "rounds with {0} second intermission": {
+  "fr": [
+   "des rounds avec {0} secondes d'intermission"
+  ],
+  "es": [
+   "rondas con {0} segundos de intermedio"
+  ]
+ },
+ "a classicsword players get when they spawn": {
+  "fr": [
+   "une ClassicSword que les joueurs reçoivent au spawn"
+  ],
+  "es": [
+   "una ClassicSword que reciben los jugadores al aparecer"
+  ]
+ },
+ "a blade players get when they spawn": {
+  "fr": [
+   "une lame que les joueurs reçoivent au spawn"
+  ],
+  "es": [
+   "una espada que reciben los jugadores al aparecer"
+  ]
+ },
+ "a sword players get when they spawn": {
+  "fr": [
+   "une épée que les joueurs reçoivent au spawn"
+  ],
+  "es": [
+   "una espada que reciben los jugadores al aparecer"
+  ]
+ },
+ "a sword tool": {
+  "fr": [
+   "un outil épée",
+   "un tool épée"
+  ],
+  "es": [
+   "una herramienta espada",
+   "un tool de espada"
+  ]
+ },
+ "a working sword": {
+  "fr": [
+   "une épée qui marche"
+  ],
+  "es": [
+   "una espada que funcione"
+  ]
+ },
+ "a saber players get when they spawn": {
+  "fr": [
+   "un sabre que les joueurs reçoivent au spawn"
+  ],
+  "es": [
+   "un sable que reciben los jugadores al aparecer"
+  ]
+ },
+ "a melee weapon": {
+  "fr": [
+   "une arme de mêlée",
+   "une arme au corps à corps"
+  ],
+  "es": [
+   "un arma cuerpo a cuerpo"
+  ]
+ },
+ "a katana players get when they spawn": {
+  "fr": [
+   "un katana que les joueurs reçoivent au spawn"
+  ],
+  "es": [
+   "una katana que reciben los jugadores al aparecer"
+  ]
+ },
+ "a sword with {0} second cooldown": {
+  "fr": [
+   "une épée avec un cooldown de {0} secondes"
+  ],
+  "es": [
+   "una espada con {0} segundos de cooldown"
+  ]
+ },
+ "a sword that does {0} damage": {
+  "fr": [
+   "une épée qui fait {0} dégâts"
+  ],
+  "es": [
+   "una espada que hace {0} de daño"
+  ]
+ },
+ "a secure item shop": {
+  "fr": [
+   "une boutique d'objets sécurisée"
+  ],
+  "es": [
+   "una tienda de objetos segura"
+  ]
+ },
+ "a shop where you buy items with {0}": {
+  "fr": [
+   "un shop où on achète des objets avec des {0}"
+  ],
+  "es": [
+   "una tienda donde compras objetos con {0}"
+  ]
+ },
+ "let players buy Flashlight for {0} {1}": {
+  "fr": [
+   "permettre aux joueurs d'acheter Flashlight pour {0} {1}"
+  ],
+  "es": [
+   "que los jugadores puedan comprar Flashlight por {0} {1}"
+  ]
+ },
+ "a shop system": {
+  "fr": [
+   "un système de boutique",
+   "un système de shop"
+  ],
+  "es": [
+   "un sistema de tienda"
+  ]
+ },
+ "let players buy Medkit for {0} {1}": {
+  "fr": [
+   "permettre aux joueurs d'acheter Medkit pour {0} {1}"
+  ],
+  "es": [
+   "que los jugadores puedan comprar Medkit por {0} {1}"
+  ]
+ },
+ "a server shop with a remote": {
+  "fr": [
+   "un shop côté serveur avec un remote"
+  ],
+  "es": [
+   "una tienda en el servidor con un remote"
+  ]
+ },
+ "let players buy Sword for {0} {1}": {
+  "fr": [
+   "permettre aux joueurs d'acheter Sword pour {0} {1}"
+  ],
+  "es": [
+   "que los jugadores puedan comprar Sword por {0} {1}"
+  ]
+ },
+ "let players buy GravityCoil for {0} {1}": {
+  "fr": [
+   "permettre aux joueurs d'acheter GravityCoil pour {0} {1}"
+  ],
+  "es": [
+   "que los jugadores puedan comprar GravityCoil por {0} {1}"
+  ]
+ },
+ "let players buy Shield for {0} {1}": {
+  "fr": [
+   "permettre aux joueurs d'acheter Shield pour {0} {1}"
+  ],
+  "es": [
+   "que los jugadores puedan comprar Shield por {0} {1}"
+  ]
+ },
+ "let players buy Rocket for {0} {1}": {
+  "fr": [
+   "permettre aux joueurs d'acheter Rocket pour {0} {1}"
+  ],
+  "es": [
+   "que los jugadores puedan comprar Rocket por {0} {1}"
+  ]
+ },
+ "let players buy SpeedCoil for {0} {1}": {
+  "fr": [
+   "permettre aux joueurs d'acheter SpeedCoil pour {0} {1}"
+  ],
+  "es": [
+   "que los jugadores puedan comprar SpeedCoil por {0} {1}"
+  ]
+ },
+ "show stats on the player list": {
+  "fr": [
+   "afficher les stats dans la liste des joueurs"
+  ],
+  "es": [
+   "mostrar las stats en la lista de jugadores"
+  ]
+ },
+ "a {0} leaderboard": {
+  "fr": [
+   "un leaderboard de {0}",
+   "un classement de {0}"
+  ],
+  "es": [
+   "una tabla de {0}",
+   "un leaderboard de {0}"
+  ]
+ },
+ "leaderstats that start at {0}": {
+  "fr": [
+   "des leaderstats qui commencent à {0}"
+  ],
+  "es": [
+   "leaderstats que empiecen en {0}"
+  ]
+ },
+ "a leaderboard": {
+  "fr": [
+   "un leaderboard",
+   "un classement"
+  ],
+  "es": [
+   "un leaderboard",
+   "una tabla de clasificación"
+  ]
+ },
+ "leaderstats with {0} and {1} and {2}": {
+  "fr": [
+   "des leaderstats avec {0}, {1} et {2}"
+  ],
+  "es": [
+   "leaderstats con {0}, {1} y {2}"
+  ]
+ },
+ "leaderstats with {0} and {1}": {
+  "fr": [
+   "des leaderstats avec {0} et {1}"
+  ],
+  "es": [
+   "leaderstats con {0} y {1}"
+  ]
+ },
+ "leaderstats with {0}": {
+  "fr": [
+   "des leaderstats avec {0}"
+  ],
+  "es": [
+   "leaderstats con {0}"
+  ]
+ },
+ "save {0} with datastore": {
+  "fr": [
+   "sauvegarder les {0} avec un datastore"
+  ],
+  "es": [
+   "guardar {0} con datastore"
+  ]
+ },
+ "save and load {0} when players leave": {
+  "fr": [
+   "sauvegarder et charger les {0} quand les joueurs partent"
+  ],
+  "es": [
+   "guardar y cargar {0} cuando los jugadores salen"
+  ]
+ },
+ "a data save system": {
+  "fr": [
+   "un système de sauvegarde des données"
+  ],
+  "es": [
+   "un sistema de guardado de datos"
+  ]
+ },
+ "save leaderstats {0}": {
+  "fr": [
+   "sauvegarder les leaderstats {0}"
+  ],
+  "es": [
+   "guardar las leaderstats {0}"
+  ]
+ },
+ "a datastore that saves player data": {
+  "fr": [
+   "un datastore qui sauvegarde les données des joueurs"
+  ],
+  "es": [
+   "un datastore que guarde los datos del jugador"
+  ]
+ },
+ "make a part rotate forever": {
+  "fr": [
+   "faire tourner une part à l'infini"
+  ],
+  "es": [
+   "hacer que una parte gire para siempre"
+  ]
+ },
+ "a spinner obstacle": {
+  "fr": [
+   "un obstacle qui tourne"
+  ],
+  "es": [
+   "un obstáculo giratorio"
+  ]
+ },
+ "a {0} part that spins": {
+  "fr": [
+   "une part {0} qui tourne"
+  ],
+  "es": [
+   "una parte {0} que gira"
+  ]
+ },
+ "a spinning part": {
+  "fr": [
+   "une part qui tourne"
+  ],
+  "es": [
+   "una parte que gira",
+   "una parte giratoria"
+  ]
+ },
+ "a rotating bar that spins {0} degrees per second": {
+  "fr": [
+   "une barre qui tourne de {0} degrés par seconde"
+  ],
+  "es": [
+   "una barra que gira {0} grados por segundo"
+  ]
+ },
+ "a toggle door": {
+  "fr": [
+   "une porte qui s'ouvre et se ferme"
+  ],
+  "es": [
+   "una puerta que se abre y se cierra"
+  ]
+ },
+ "a gate that opens and closes": {
+  "fr": [
+   "un portail qui s'ouvre et se ferme"
+  ],
+  "es": [
+   "una reja que se abre y se cierra"
+  ]
+ },
+ "a sliding door": {
+  "fr": [
+   "une porte coulissante"
+  ],
+  "es": [
+   "una puerta corrediza"
+  ]
+ },
+ "a door that closes after {0} seconds": {
+  "fr": [
+   "une porte qui se ferme après {0} secondes"
+  ],
+  "es": [
+   "una puerta que se cierra después de {0} segundos"
+  ]
+ },
+ "a door that opens when clicked": {
+  "fr": [
+   "une porte qui s'ouvre quand on clique dessus"
+  ],
+  "es": [
+   "una puerta que se abre al hacer clic"
+  ]
+ },
+ "a clickable door": {
+  "fr": [
+   "une porte cliquable"
+  ],
+  "es": [
+   "una puerta clicable",
+   "una puerta que se abre con clic"
+  ]
+ },
+ "a door with a proximity prompt": {
+  "fr": [
+   "une porte avec un ProximityPrompt"
+  ],
+  "es": [
+   "una puerta con ProximityPrompt"
+  ]
+ },
+ "a slidingdoor that opens and closes": {
+  "fr": [
+   "une SlidingDoor qui s'ouvre et se ferme"
+  ],
+  "es": [
+   "una SlidingDoor que se abre y se cierra"
+  ]
+ },
+ "a door that opens and closes": {
+  "fr": [
+   "une porte qui s'ouvre et se ferme"
+  ],
+  "es": [
+   "una puerta que se abre y se cierra"
+  ]
+ },
+ "a vaultdoor that opens and closes": {
+  "fr": [
+   "une VaultDoor qui s'ouvre et se ferme"
+  ],
+  "es": [
+   "una VaultDoor que se abre y se cierra"
+  ]
+ },
+ "a proximity prompt reward chest": {
+  "fr": [
+   "un coffre à récompense avec ProximityPrompt"
+  ],
+  "es": [
+   "un cofre de recompensa con ProximityPrompt"
+  ]
+ },
+ "a chest you can open every {0} seconds": {
+  "fr": [
+   "un coffre qu'on peut ouvrir toutes les {0} secondes"
+  ],
+  "es": [
+   "un cofre que puedes abrir cada {0} segundos"
+  ]
+ },
+ "a daily reward chest": {
+  "fr": [
+   "un coffre de récompense quotidienne"
+  ],
+  "es": [
+   "un cofre de recompensa diaria"
+  ]
+ },
+ "a treasure chest that gives {0}": {
+  "fr": [
+   "un coffre au trésor qui donne des {0}"
+  ],
+  "es": [
+   "un cofre del tesoro que da {0}"
+  ]
+ },
+ "a chest that gives {0} {1}": {
+  "fr": [
+   "un coffre qui donne {0} {1}"
+  ],
+  "es": [
+   "un cofre que da {0} {1}"
+  ]
+ },
+ "a healing pad": {
+  "fr": [
+   "un pad de soin"
+  ],
+  "es": [
+   "una plataforma de curación"
+  ]
+ },
+ "a heal zone": {
+  "fr": [
+   "une zone de soin"
+  ],
+  "es": [
+   "una zona de curación"
+  ]
+ },
+ "a regen pad that heals players standing on it": {
+  "fr": [
+   "un pad de régénération qui soigne les joueurs dessus"
+  ],
+  "es": [
+   "una plataforma de regeneración que cura a los jugadores encima"
+  ]
+ },
+ "a part that heals {0} health": {
+  "fr": [
+   "une part qui soigne {0} de vie"
+  ],
+  "es": [
+   "una parte que cura {0} de vida"
+  ]
+ },
+ "fading platforms for an obby": {
+  "fr": [
+   "des plateformes qui disparaissent pour un obby"
+  ],
+  "es": [
+   "plataformas que desaparecen para un obby"
+  ]
+ },
+ "{0} platforms that vanish when touched": {
+  "fr": [
+   "{0} plateformes qui disparaissent quand on les touche"
+  ],
+  "es": [
+   "{0} plataformas que desaparecen al tocarlas"
+  ]
+ },
+ "platforms that disappear after {0} seconds and come back": {
+  "fr": [
+   "des plateformes qui disparaissent après {0} secondes et reviennent"
+  ],
+  "es": [
+   "plataformas que desaparecen después de {0} segundos y vuelven"
+  ]
+ },
+ "disappearing platforms": {
+  "fr": [
+   "des plateformes qui disparaissent"
+  ],
+  "es": [
+   "plataformas que desaparecen"
+  ]
+ },
+ "a jump pad": {
+  "fr": [
+   "un jump pad",
+   "un pad de saut"
+  ],
+  "es": [
+   "un jump pad",
+   "una plataforma de salto"
+  ]
+ },
+ "a {0} bounce pad": {
+  "fr": [
+   "un trampoline {0}"
+  ],
+  "es": [
+   "una plataforma de rebote {0}"
+  ]
+ },
+ "a launch pad with power {0}": {
+  "fr": [
+   "un pad de lancement avec une puissance de {0}"
+  ],
+  "es": [
+   "una plataforma de lanzamiento con potencia {0}"
+  ]
+ },
+ "a trampoline part": {
+  "fr": [
+   "une part trampoline"
+  ],
+  "es": [
+   "una parte trampolín"
+  ]
+ },
+ "a speed boost pad": {
+  "fr": [
+   "un pad de boost de vitesse"
+  ],
+  "es": [
+   "una plataforma de velocidad"
+  ]
+ },
+ "a speed boost": {
+  "fr": [
+   "un boost de vitesse"
+  ],
+  "es": [
+   "un boost de velocidad"
+  ]
+ },
+ "a speed pad that sets speed to {0}": {
+  "fr": [
+   "un speed pad qui met la vitesse à {0}"
+  ],
+  "es": [
+   "una plataforma de velocidad que pone la velocidad en {0}"
+  ]
+ },
+ "a pad that makes you fast for {0} seconds": {
+  "fr": [
+   "un pad qui te rend rapide pendant {0} secondes"
+  ],
+  "es": [
+   "una plataforma que te hace rápido durante {0} segundos"
+  ]
+ },
+ "a countdown timer gui": {
+  "fr": [
+   "un GUI de compte à rebours"
+  ],
+  "es": [
+   "una GUI de cuenta regresiva"
+  ]
+ },
+ "a timer ui": {
+  "fr": [
+   "une UI de timer",
+   "un chrono à l'écran"
+  ],
+  "es": [
+   "una UI de temporizador"
+  ]
+ },
+ "show a countdown on the screen": {
+  "fr": [
+   "afficher un compte à rebours à l'écran"
+  ],
+  "es": [
+   "mostrar una cuenta regresiva en la pantalla"
+  ]
+ },
+ "a {0} second timer on screen": {
+  "fr": [
+   "un timer de {0} secondes à l'écran"
+  ],
+  "es": [
+   "un temporizador de {0} segundos en pantalla"
+  ]
+ },
+ "a clicker game": {
+  "fr": [
+   "un jeu clicker"
+  ],
+  "es": [
+   "un juego clicker"
+  ]
+ },
+ "a button that gives {0} when clicked": {
+  "fr": [
+   "un bouton qui donne des {0} quand on clique"
+  ],
+  "es": [
+   "un botón que da {0} al hacer clic"
+  ]
+ },
+ "a click to earn system": {
+  "fr": [
+   "un système où on clique pour gagner"
+  ],
+  "es": [
+   "un sistema de clic para ganar"
+  ]
+ },
+ "a clicker where each click gives {0} {1}": {
+  "fr": [
+   "un clicker où chaque clic donne {0} {1}"
+  ],
+  "es": [
+   "un clicker donde cada clic da {0} {1}"
+  ]
+ },
+ "a starter map tool": {
+  "fr": [
+   "un outil carte de départ"
+  ],
+  "es": [
+   "una herramienta de mapa inicial"
+  ]
+ },
+ "give players a tool on spawn": {
+  "fr": [
+   "donner un outil aux joueurs au spawn"
+  ],
+  "es": [
+   "darle una herramienta a los jugadores al aparecer"
+  ]
+ },
+ "give every player a flashlight when they join": {
+  "fr": [
+   "donner une lampe torche à chaque joueur quand il rejoint"
+  ],
+  "es": [
+   "darle una linterna a cada jugador al entrar"
+  ]
+ },
+ "a starter pickaxe tool": {
+  "fr": [
+   "une pioche de départ"
+  ],
+  "es": [
+   "un pico inicial"
+  ]
+ },
+ "a starter torch tool": {
+  "fr": [
+   "une torche de départ"
+  ],
+  "es": [
+   "una antorcha inicial"
+  ]
+ },
+ "give every player a torch when they join": {
+  "fr": [
+   "donner une torche à chaque joueur quand il rejoint"
+  ],
+  "es": [
+   "darle una antorcha a cada jugador al entrar"
+  ]
+ },
+ "give every player a hammer when they join": {
+  "fr": [
+   "donner un marteau à chaque joueur quand il rejoint"
+  ],
+  "es": [
+   "darle un martillo a cada jugador al entrar"
+  ]
+ },
+ "a starter hammer tool": {
+  "fr": [
+   "un marteau de départ"
+  ],
+  "es": [
+   "un martillo inicial"
+  ]
+ },
+ "give every player a pickaxe when they join": {
+  "fr": [
+   "donner une pioche à chaque joueur quand il rejoint"
+  ],
+  "es": [
+   "darle un pico a cada jugador al entrar"
+  ]
+ },
+ "give every player a map when they join": {
+  "fr": [
+   "donner une carte à chaque joueur quand il rejoint"
+  ],
+  "es": [
+   "darle un mapa a cada jugador al entrar"
+  ]
+ },
+ "a starter flashlight tool": {
+  "fr": [
+   "une lampe torche de départ"
+  ],
+  "es": [
+   "una linterna inicial"
+  ]
+ },
+ "simple admin commands like speed and heal": {
+  "fr": [
+   "des commandes admin simples comme speed et heal"
+  ],
+  "es": [
+   "comandos de admin simples como speed y heal"
+  ]
+ },
+ "admin commands": {
+  "fr": [
+   "des commandes admin"
+  ],
+  "es": [
+   "comandos de admin"
+  ]
+ },
+ "chat commands with ! prefix": {
+  "fr": [
+   "des commandes chat avec le préfixe !"
+  ],
+  "es": [
+   "comandos de chat con prefijo !"
+  ]
+ },
+ "a heal command for admins": {
+  "fr": [
+   "une commande heal pour les admins"
+  ],
+  "es": [
+   "un comando de curar para admins"
+  ]
+ },
+ "chat commands with ; prefix": {
+  "fr": [
+   "des commandes chat avec le préfixe ;"
+  ],
+  "es": [
+   "comandos de chat con prefijo ;"
+  ]
+ },
+ "chat commands with / prefix": {
+  "fr": [
+   "des commandes chat avec le préfixe /"
+  ],
+  "es": [
+   "comandos de chat con prefijo /"
+  ]
+ },
+ "chat commands with : prefix": {
+  "fr": [
+   "des commandes chat avec le préfixe :"
+  ],
+  "es": [
+   "comandos de chat con prefijo :"
+  ]
+ },
+ "a music player script": {
+  "fr": [
+   "un script de lecteur de musique"
+  ],
+  "es": [
+   "un script de reproductor de música"
+  ]
+ },
+ "background music": {
+  "fr": [
+   "de la musique de fond"
+  ],
+  "es": [
+   "música de fondo"
+  ]
+ },
+ "a music playlist": {
+  "fr": [
+   "une playlist de musique"
+  ],
+  "es": [
+   "una playlist de música"
+  ]
+ },
+ "loop music in the game": {
+  "fr": [
+   "mettre de la musique en boucle dans le jeu"
+  ],
+  "es": [
+   "poner música en bucle en el juego"
+  ]
+ },
+ "raining parts": {
+  "fr": [
+   "une pluie de parts"
+  ],
+  "es": [
+   "lluvia de partes"
+  ]
+ },
+ "parts falling from the sky": {
+  "fr": [
+   "des parts qui tombent du ciel"
+  ],
+  "es": [
+   "partes que caen del cielo"
+  ]
+ },
+ "spawn a random part every {0} seconds": {
+  "fr": [
+   "faire apparaître une part aléatoire toutes les {0} secondes"
+  ],
+  "es": [
+   "generar una parte aleatoria cada {0} segundos"
+  ]
+ },
+ "a meteor shower": {
+  "fr": [
+   "une pluie de météores"
+  ],
+  "es": [
+   "una lluvia de meteoritos"
+  ]
+ },
+ "make an npc chase the closest player": {
+  "fr": [
+   "faire poursuivre le joueur le plus proche par un PNJ"
+  ],
+  "es": [
+   "hacer que un NPC persiga al jugador más cercano"
+  ]
+ },
+ "an npc that follows the player": {
+  "fr": [
+   "un PNJ qui suit le joueur"
+  ],
+  "es": [
+   "un NPC que sigue al jugador"
+  ]
+ },
+ "a zombie that chases players": {
+  "fr": [
+   "un zombie qui poursuit les joueurs"
+  ],
+  "es": [
+   "un zombi que persigue a los jugadores"
+  ]
+ },
+ "an enemy that follows players within {0} studs": {
+  "fr": [
+   "un ennemi qui suit les joueurs à moins de {0} studs"
+  ],
+  "es": [
+   "un enemigo que sigue a los jugadores a menos de {0} studs"
+  ]
+ },
+ "show player names above their heads": {
+  "fr": [
+   "afficher le nom des joueurs au-dessus de leur tête"
+  ],
+  "es": [
+   "mostrar los nombres de los jugadores sobre su cabeza"
+  ]
+ },
+ "an overhead name tag": {
+  "fr": [
+   "un name tag au-dessus de la tête"
+  ],
+  "es": [
+   "un name tag encima de la cabeza"
+  ]
+ },
+ "a billboard gui above players heads": {
+  "fr": [
+   "un BillboardGui au-dessus de la tête des joueurs"
+  ],
+  "es": [
+   "un BillboardGui encima de la cabeza de los jugadores"
+  ]
+ },
+ "a {0} name tag over players": {
+  "fr": [
+   "un name tag {0} au-dessus des joueurs"
+  ],
+  "es": [
+   "un name tag {0} encima de los jugadores"
+  ]
+ },
+ "kills and deaths leaderstats": {
+  "fr": [
+   "des leaderstats kills et morts"
+  ],
+  "es": [
+   "leaderstats de kills y muertes"
+  ]
+ },
+ "track kills and deaths": {
+  "fr": [
+   "compter les kills et les morts"
+  ],
+  "es": [
+   "contar kills y muertes"
+  ]
+ },
+ "a kills leaderboard": {
+  "fr": [
+   "un leaderboard de kills",
+   "un classement des kills"
+  ],
+  "es": [
+   "un leaderboard de kills",
+   "una tabla de kills"
+  ]
+ },
+ "give kills to the player who killed someone": {
+  "fr": [
+   "donner un kill au joueur qui a tué quelqu'un"
+  ],
+  "es": [
+   "darle el kill al jugador que mató a alguien"
+  ]
+ },
+ "obby checkpoints with a stage leaderstat": {
+  "fr": [
+   "des checkpoints d'obby avec un leaderstat Stage"
+  ],
+  "es": [
+   "checkpoints de obby con un leaderstat de Stage"
+  ]
+ },
+ "checkpoints for an obby": {
+  "fr": [
+   "des checkpoints pour un obby"
+  ],
+  "es": [
+   "checkpoints para un obby"
+  ]
+ },
+ "{0} checkpoints that save your stage": {
+  "fr": [
+   "{0} checkpoints qui sauvegardent ton stage"
+  ],
+  "es": [
+   "{0} checkpoints que guardan tu stage"
+  ]
+ },
+ "a stage checkpoint system": {
+  "fr": [
+   "un système de checkpoints par stage"
+  ],
+  "es": [
+   "un sistema de checkpoints por stage"
+  ]
+ },
+ "load and play an animation on the character": {
+  "fr": [
+   "charger et jouer une animation sur le personnage"
+  ],
+  "es": [
+   "cargar y reproducir una animación en el personaje"
+  ]
+ },
+ "play an animation when pressing {0}": {
+  "fr": [
+   "jouer une animation quand on appuie sur {0}"
+  ],
+  "es": [
+   "reproducir una animación al presionar {0}"
+  ]
+ },
+ "play a custom animation on key press": {
+  "fr": [
+   "jouer une animation perso quand on appuie sur une touche"
+  ],
+  "es": [
+   "reproducir una animación personalizada al presionar una tecla"
+  ]
+ },
+ "an emote on the {0} key": {
+  "fr": [
+   "une emote sur la touche {0}"
+  ],
+  "es": [
+   "un emote en la tecla {0}"
+  ]
+ },
+ "a camera shake function": {
+  "fr": [
+   "une fonction pour faire trembler la caméra"
+  ],
+  "es": [
+   "una función de temblor de cámara"
+  ]
+ },
+ "shake the camera": {
+  "fr": [
+   "faire trembler la caméra"
+  ],
+  "es": [
+   "hacer temblar la cámara"
+  ]
+ },
+ "camera shake": {
+  "fr": [
+   "tremblement de caméra",
+   "camera shake"
+  ],
+  "es": [
+   "temblor de cámara",
+   "camera shake"
+  ]
+ },
+ "a screen shake effect": {
+  "fr": [
+   "un effet de tremblement d'écran"
+  ],
+  "es": [
+   "un efecto de temblor de pantalla"
+  ]
+ },
+ "a number abbreviation module": {
+  "fr": [
+   "un module pour abréger les nombres"
+  ],
+  "es": [
+   "un módulo para abreviar números"
+  ]
+ },
+ "a module with helper functions": {
+  "fr": [
+   "un ModuleScript avec des fonctions utiles"
+  ],
+  "es": [
+   "un ModuleScript con funciones de ayuda"
+  ]
+ },
+ "a utility module": {
+  "fr": [
+   "un module utilitaire"
+  ],
+  "es": [
+   "un módulo de utilidades"
+  ]
+ },
+ "a module script to format numbers": {
+  "fr": [
+   "un ModuleScript pour formater les nombres"
+  ],
+  "es": [
+   "un ModuleScript para formatear números"
+  ]
+ },
+ "a script that builds an obby": {
+  "fr": [
+   "un script qui construit un obby"
+  ],
+  "es": [
+   "un script que construya un obby"
+  ]
+ },
+ "an obby with {0} platforms": {
+  "fr": [
+   "un obby avec {0} plateformes"
+  ],
+  "es": [
+   "un obby con {0} plataformas"
+  ]
+ },
+ "build an obby with a script": {
+  "fr": [
+   "construire un obby avec un script"
+  ],
+  "es": [
+   "construir un obby con un script"
+  ]
+ },
+ "a {0} obby": {
+  "fr": [
+   "un obby {0}"
+  ],
+  "es": [
+   "un obby {0}"
+  ]
+ },
+ "generate {0} parkour platforms": {
+  "fr": [
+   "générer {0} plateformes de parkour"
+  ],
+  "es": [
+   "generar {0} plataformas de parkour"
+  ]
+ },
+ "generate a small house": {
+  "fr": [
+   "générer une petite maison"
+  ],
+  "es": [
+   "generar una casa pequeña"
+  ]
+ },
+ "build a house with a script": {
+  "fr": [
+   "construire une maison avec un script"
+  ],
+  "es": [
+   "construir una casa con un script"
+  ]
+ },
+ "a woodplanks house": {
+  "fr": [
+   "une maison en planches de bois",
+   "une maison en WoodPlanks"
+  ],
+  "es": [
+   "una casa de tablas de madera",
+   "una casa de WoodPlanks"
+  ]
+ },
+ "a script that makes a {0} by {1} house": {
+  "fr": [
+   "un script qui fait une maison de {0} sur {1}"
+  ],
+  "es": [
+   "un script que haga una casa de {0} por {1}"
+  ]
+ },
+ "a wood house": {
+  "fr": [
+   "une maison en bois"
+  ],
+  "es": [
+   "una casa de madera"
+  ]
+ },
+ "a concrete house": {
+  "fr": [
+   "une maison en béton"
+  ],
+  "es": [
+   "una casa de concreto",
+   "una casa de hormigón"
+  ]
+ },
+ "a cobblestone house": {
+  "fr": [
+   "une maison en pierre",
+   "une maison en pavés"
+  ],
+  "es": [
+   "una casa de piedra",
+   "una casa de adoquines"
+  ]
+ },
+ "a brick house": {
+  "fr": [
+   "une maison en briques"
+  ],
+  "es": [
+   "una casa de ladrillos"
+  ]
+ },
+ "a tower with {0} floors": {
+  "fr": [
+   "une tour avec {0} étages"
+  ],
+  "es": [
+   "una torre con {0} pisos"
+  ]
+ },
+ "a {0} story building": {
+  "fr": [
+   "un bâtiment de {0} étages"
+  ],
+  "es": [
+   "un edificio de {0} pisos"
+  ]
+ },
+ "a tall tower": {
+  "fr": [
+   "une grande tour"
+  ],
+  "es": [
+   "una torre alta"
+  ]
+ },
+ "build a tower with a script": {
+  "fr": [
+   "construire une tour avec un script"
+  ],
+  "es": [
+   "construir una torre con un script"
+  ]
+ },
+ "a hud for {0}": {
+  "fr": [
+   "un HUD pour les {0}"
+  ],
+  "es": [
+   "un HUD para {0}"
+  ]
+ },
+ "a gui that shows my {0}": {
+  "fr": [
+   "un GUI qui affiche mes {0}"
+  ],
+  "es": [
+   "una GUI que muestre mis {0}"
+  ]
+ },
+ "a currency display ui": {
+  "fr": [
+   "une UI qui affiche la monnaie"
+  ],
+  "es": [
+   "una UI que muestre la moneda"
+  ]
+ },
+ "show {0} on the screen": {
+  "fr": [
+   "afficher les {0} à l'écran"
+  ],
+  "es": [
+   "mostrar {0} en la pantalla"
+  ]
+ }
+}

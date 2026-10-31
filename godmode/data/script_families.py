@@ -1660,19 +1660,85 @@ def verify_solution(src: str) -> bool:
     return check_structure(src).ok and not [f for f in lint(src) if f.severity == "error"] and not lint(src)
 
 
-def sample(family: str, rng: random.Random) -> ScriptSample:
+# ---- French / Spanish phrasing (templates translated once into i18n_cores.json) -------------
+ASK_I18N = {"fr": ["", "", "fais ", "fais-moi ", "crée ", "écris ", "je veux ", "j'ai besoin d'", "tu peux faire ",
+                   "code ", "comment faire ", "ajoute ", "roblox : "],
+            "es": ["", "", "haz ", "hazme ", "crea ", "escribe ", "quiero ", "necesito ", "puedes hacer ", "programa ",
+                   "cómo hago ", "añade ", "roblox: "]}
+TAIL_I18N = {"fr": ["", "", "", " dans roblox", " pour mon jeu", " stp", " svp", " (script complet)", " avec des commentaires"],
+             "es": ["", "", "", " en roblox", " para mi juego", " por favor", " porfa", " (script completo)", " con comentarios"]}
+COLOR_I18N = {"red": ("rouge", "rojo"), "green": ("vert", "verde"), "blue": ("bleu", "azul"), "yellow": ("jaune", "amarillo"),
+              "purple": ("violet", "morado"), "orange": ("orange", "naranja"), "white": ("blanc", "blanco"),
+              "black": ("noir", "negro"), "pink": ("rose", "rosa"), "cyan": ("cyan", "cian")}
+_SLOT = re.compile(r"\d+(?:\.\d+)?|\b(?:%s)\b" % "|".join(
+    map(re.escape, sorted(list(COLORS) + KEYS + STATS, key=len, reverse=True))), re.I)
+_I18N: dict | None = None
+
+
+def _i18n() -> dict:
+    global _I18N
+    if _I18N is None:
+        import json
+        from pathlib import Path
+        f = Path(__file__).with_name("i18n_cores.json")
+        _I18N = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    return _I18N
+
+
+def translate_core(core: str, lang: str, rng: random.Random) -> str | None:
+    """English core -> French/Spanish, keeping the exact numbers / colours / keys / stat names. None if untranslated."""
+    vals: list[str] = []
+
+    def take(m):
+        vals.append(m.group(0))
+        return "{%d}" % (len(vals) - 1)
+
+    entry = _i18n().get(_SLOT.sub(take, core))
+    if not entry or not entry.get(lang):
+        return None
+    li = 0 if lang == "fr" else 1
+    out = rng.choice(entry[lang])
+    for i, v in enumerate(vals):
+        v = COLOR_I18N.get(v.lower(), (v, v))[li] if v.lower() in COLOR_I18N else v
+        out = out.replace("{%d}" % i, v)
+    return out
+
+
+def _phrase_lang(rng: random.Random, core: str, lang: str) -> str:
+    p = rng.choice(ASK_I18N[lang]) + core + rng.choice(TAIL_I18N[lang])
+    p = re.sub(r"\s+", " ", p).strip()
+    if lang == "fr":  # elision: "besoin d'" only before a vowel, "de" + vowel -> "d'"
+        p = re.sub(r"\bd'(?=[^aeiouyhéèêàâîôû])", "de ", p, flags=re.I)
+        p = re.sub(r"\bde (de |d')", r"\1", p)
+        p = re.sub(r"\bde (?=[aeiouyéèêàâîôû])", "d'", p, flags=re.I)
+    if rng.random() < 0.3:
+        p = p[0].upper() + p[1:]
+    if rng.random() < 0.15:
+        p += rng.choice(["?", ".", "!"])
+    return p
+
+
+def sample(family: str, rng: random.Random, lang: str = "en") -> ScriptSample:
     core, src = FAMILIES[family](rng)
+    if lang != "en":
+        t = translate_core(core, lang, rng)
+        if t:
+            return ScriptSample(family, _phrase_lang(rng, t, lang), src)
     return ScriptSample(family, _phrase(rng, core), src)
 
 
-def generate(n_per_family: int, seed: int = 0, families: list[str] | None = None) -> tuple[list[ScriptSample], int]:
-    """Verified samples (deduplicated on prompt+solution) and the number rejected by the verifier."""
+def generate(n_per_family: int, seed: int = 0, families: list[str] | None = None,
+             langs: tuple[str, ...] = ("en",)) -> tuple[list[ScriptSample], int]:
+    """Verified samples (deduplicated on prompt+solution) and the number rejected by the verifier.
+
+    With several ``langs`` each sample's prompt language is drawn uniformly (FR/ES fall back to English
+    for a template that has no translation)."""
     rng = random.Random(seed)
     out, rejected, seen = [], 0, set()
     verified_cache: dict[str, bool] = {}
     for fam in families or list(FAMILIES):
         for _ in range(n_per_family):
-            s = sample(fam, rng)
+            s = sample(fam, rng, rng.choice(langs) if len(langs) > 1 else langs[0])
             key = (s.prompt, s.solution)
             if key in seen:
                 continue

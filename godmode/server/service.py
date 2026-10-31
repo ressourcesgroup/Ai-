@@ -18,6 +18,10 @@ VERSION = "0.1.0"
 PROTOCOL_VERSION = 1
 MAX_MESSAGE_CHARS = 8000
 MAX_SOURCE_CHARS = 400_000
+# Script-type tools: when a fine-tuned model is loaded, the model writes these itself first and the
+# deterministic template is only the fallback (no verified candidate, or "engine": "tool" in the request).
+MODEL_FIRST = frozenset({"remote_event", "leaderstats", "datastore", "ui_hud", "npc_patrol", "tween_door",
+                         "moving_platform"})
 
 
 class BadRequest(ValueError):
@@ -85,7 +89,19 @@ class GodmodeService:
         intent = route(message, context)
         trace.step("Understand request", f"router intent '{intent.name}' (confidence {intent.confidence:.2f})")
 
-        if intent.name in TOOLS:
+        model_resp = None
+        if (intent.name in MODEL_FIRST and body.get("engine") != "tool" and self.model.ckpt_path
+                and self.model._load() and self.model.prompt_style == "chat"):
+            trace.step("Model first", f"'{intent.name}' is a script request: the model writes it, "
+                       f"tool:{TOOL_TAGS[intent.name]} is the fallback")
+            model_resp = self._model(message, level, trace)
+            if not model_resp["actions"]:
+                trace.step("Fallback", "no verified model candidate - using the template tool")
+                model_resp = None
+        if model_resp is not None:
+            resp = model_resp
+            summary = resp.pop("summary")
+        elif intent.name in TOOLS:
             resp = self._tool(intent, message, context)
             trace.step("Run generator", f"tool:{TOOL_TAGS[intent.name]} - "
                        f"{sum(v['ok'] for v in resp['verification'])}/{len(resp['verification'])} checks passed")

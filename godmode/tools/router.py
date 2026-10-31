@@ -24,25 +24,30 @@ TOOL_THRESHOLD = 0.5
 RULES: dict[str, list[tuple[str, float]]] = {
     "remote_event": [(r"\bremote ?events?\b", 0.9), (r"\bremotes?\b", 0.6), (r"\bfire ?server\b", 0.6),
                      (r"\bclient\W+(to\W+)?server\b", 0.5), (r"\bnetwork(ing)?\b", 0.3)],
-    "leaderstats": [(r"\bleader ?stats\b", 0.95), (r"\bleaderboard\b", 0.8), (r"\b(coins?|cash|kills|wins|points) (stat|counter)s?\b", 0.5)],
+    "leaderstats": [(r"\bleader ?stats\b", 0.95), (r"\bleaderboard\b", 0.8), (r"\bclassement\b", 0.8),
+                    (r"\btabla de (clasificaci[óo]n|puntuaci[óo]n)\b", 0.8), (r"\b(coins?|cash|kills|wins|points) (stat|counter)s?\b", 0.5)],
     "datastore": [(r"\bdata ?stores?\b", 0.95), (r"\bsav(e|es|ing)\b.{0,30}\b(data|progress|stats|coins|player)\b", 0.8),
                   (r"\bpersist\w*\b", 0.6), (r"\bsession lock\w*\b", 0.7)],
     "ui_hud": [(r"\bhud\b", 0.9), (r"\bhealth ?bar\b", 0.8), (r"\bscreen ?gui\b", 0.8), (r"\b(gui|ui)\b", 0.6),
                (r"\bcurrency (label|display|counter)\b", 0.6), (r"\bmenu button\b", 0.5)],
     "npc_patrol": [(r"\bpatrol\w*\b", 0.9), (r"\bpathfinding\w*\b", 0.8), (r"\bnpcs?\b", 0.45),
+                   (r"\b(pnj|pnjs)\b", 0.45), (r"\b(patrouill\w*|patrull\w*)\b", 0.9),
                    (r"\bnpcs?\b.{0,30}\b(walk|walks|move|moves|wander|roam|follow)\b", 0.4), (r"\bwaypoints?\b", 0.4)],
-    "tween_door": [(r"\bdoors?\b", 0.85), (r"\bgate\b", 0.5)],
-    "moving_platform": [(r"\bmoving platforms?\b", 0.95), (r"\bplatforms? that moves?\b", 0.9), (r"\belevator\b", 0.8),
+    "tween_door": [(r"\bdoors?\b", 0.85), (r"\bgate\b", 0.5), (r"\bportes?\b", 0.85), (r"\bpuertas?\b", 0.85)],
+    "moving_platform": [(r"\bmoving platforms?\b", 0.95), (r"\bplate-?formes? (mobiles?|qui bouge\w*)\b", 0.95),
+                        (r"\bplataformas? (m[óo]vil(es)?|que se mueve)\b", 0.95), (r"\bascen[cs]eur\b", 0.8),
+                        (r"\bascensor\b", 0.8), (r"\bplatforms? that moves?\b", 0.9), (r"\belevator\b", 0.8),
                         (r"\blift\b", 0.5)],
-    "build_obby": [(r"\bobby\b", 0.95), (r"\bobstacle course\b", 0.95), (r"\bparkour\b", 0.8), (r"\bkill ?bricks?\b", 0.25),
+    "build_obby": [(r"\bobby\b", 0.95), (r"\bobstacle course\b", 0.95), (r"\bparcours d'obstacles\b", 0.95),
+                   (r"\bcarrera de obst[áa]culos\b", 0.95), (r"\bparkour\b", 0.8), (r"\bkill ?bricks?\b", 0.25),
                    (r"\blava\b", 0.4)],
-    "build_house": [(r"\bhouses?\b", 0.9), (r"\b(home|cabin|hut|cottage)\b", 0.7), (r"\broom\b", 0.6), (r"\bbuilding\b", 0.5)],
-    "build_tower": [(r"\btowers?\b", 0.9), (r"\bskyscraper\b", 0.8)],
-    "build_staircase": [(r"\bstair(s|case|way)?\b", 0.9), (r"\bsteps\b", 0.4)],
+    "build_house": [(r"\bhouses?\b", 0.9), (r"\bmaisons?\b", 0.9), (r"\bcasas?\b", 0.9), (r"\b(home|cabin|hut|cottage)\b", 0.7), (r"\broom\b", 0.6), (r"\bbuilding\b", 0.5)],
+    "build_tower": [(r"\btowers?\b", 0.9), (r"\btours?\b", 0.85), (r"\btorres?\b", 0.9), (r"\bskyscraper\b", 0.8)],
+    "build_staircase": [(r"\bstair(s|case|way)?\b", 0.9), (r"\bescaliers?\b", 0.9), (r"\bescaleras?\b", 0.9), (r"\bsteps\b", 0.4)],
     "build_arena": [(r"\barena\b", 0.9), (r"\bbattle ?ground\b", 0.8), (r"\bmap\b", 0.6), (r"\bspawn ?points?\b", 0.5),
                     (r"\bpvp\b", 0.4)],
-    "build_tree": [(r"\btrees?\b", 0.85), (r"\bforest\b", 0.8), (r"\blow.?poly\b", 0.2)],
-    "build_car": [(r"\bcars?\b", 0.85), (r"\bvehicle\b", 0.7), (r"\btruck\b", 0.6)],
+    "build_tree": [(r"\btrees?\b", 0.85), (r"\barbres?\b", 0.85), (r"\b[áa]rbol(es)?\b", 0.85), (r"\bforest\b", 0.8), (r"\blow.?poly\b", 0.2)],
+    "build_car": [(r"\bcars?\b", 0.85), (r"\bvoitures?\b", 0.85), (r"\bcoches?\b", 0.85), (r"\bvehicle\b", 0.7), (r"\btruck\b", 0.6)],
     "delete_selected": [(r"\b(delete|remove|destroy)\b", 0.5), (r"\b(selected|selection|these|this)\b", 0.3)],
     "script_review": [(r"\b(review|lint|check|audit|verify|fix)\b.{0,25}\b(script|code|my)\b", 0.9),
                       (r"\bwhat'?s wrong\b", 0.6), (r"\bopen script\b", 0.4)],
@@ -50,9 +55,16 @@ RULES: dict[str, list[tuple[str, float]]] = {
 }
 
 ANIM_WORDS = r"\b(animat\w*|anim|emote|keyframes?|moves?et)\b"
-BUILD_VERBS = r"\b(make|build|create|generate|add|spawn|give me|i want|i need|place|put|set ?up|insert|design)\b"
-QUESTION = r"^\s*(how|what|why|when|where|which|explain|is|are|does|do|should|whats|what's)\b"
-CODE_WORDS = r"\b(write|code|script|function|module|class|implement|luau|lua)\b"
+# English + French + Spanish (the three trained prompt languages); accents optional.
+BUILD_VERBS = (r"\b(make|build|create|generate|add|spawn|give me|i want|i need|place|put|set ?up|insert|design"
+               r"|fais|faire|fait|cr[ée]e[rz]?|construi[st]|construire|ajoute[rz]?|g[ée]n[èe]re[rz]?|je veux|j'ai besoin"
+               r"|mets|place[rz]?|haz|hazme|hacer|crea|crear|construye|construir|a[ñn]ade|agrega|genera|quiero|necesito"
+               r"|pon|coloca)\b")
+QUESTION = (r"^\s*[¿¡]?\s*(how|what|why|when|where|which|explain|is|are|does|do|should|whats|what's"
+            r"|comment|pourquoi|quand|o[ùu]|quel(le)?s?|qu'est-ce|c'est quoi|est-ce|explique"
+            r"|c[óo]mo|por ?qu[ée]|cu[áa]ndo|d[óo]nde|qu[ée]|cu[áa]l(es)?|explica)\b")
+CODE_WORDS = (r"\b(write|code|script|function|module|class|implement|luau|lua|[ée]cri[st]|[ée]crire|fonction|programme"
+              r"|escribe|escribir|c[óo]digo|funci[óo]n|programa)\b")
 
 
 @dataclass

@@ -20,38 +20,38 @@ OUT = Path("plugin/src/OfflineData.luau")
 
 # (key, prompt sent to the real service, keywords the plugin matches on)
 TOOL_INTENTS = [
-    ("obby", "build an obby with 10 platforms", ["obby", "parkour", "obstacle", "platform", "kill brick"]),
-    ("house", "build a house", ["house", "home", "room", "building", "cabin"]),
-    ("tower", "build a tower", ["tower", "skyscraper"]),
-    ("staircase", "build a staircase", ["stair", "steps", "staircase"]),
-    ("arena", "build an arena with spawn points", ["arena", "map", "battleground", "spawn point"]),
-    ("tree", "make a tree", ["tree", "forest"]),
-    ("car", "build a car", ["car", "vehicle", "kart"]),
-    ("remote_event", "create a validated remote event", ["remote", "remoteevent", "fireserver", "client to server", "network"]),
-    ("leaderstats", "add leaderstats with coins", ["leaderstats", "leaderboard", "coins", "cash", "stats"]),
-    ("datastore", "save player data with datastores", ["datastore", "save", "load", "data store", "persist"]),
-    ("ui_hud", "make a HUD with a health bar", ["hud", "ui", "gui", "health bar", "screengui", "button"]),
-    ("npc_patrol", "make an npc that patrols", ["npc", "patrol", "enemy", "pathfinding", "guard"]),
-    ("tween_door", "make a door that tweens open", ["door", "tween", "gate"]),
-    ("moving_platform", "make a moving platform", ["moving platform", "elevator", "lift"]),
+    ("obby", "build an obby with 10 platforms", ["obby", "parkour", "obstacle", "platform", "kill brick", "parcours", "obstáculo"]),
+    ("house", "build a house", ["house", "home", "room", "building", "cabin", "maison", "casa", "cabane", "cabaña"]),
+    ("tower", "build a tower", ["tower", "skyscraper", "une tour", "la tour", "torre", "gratte-ciel", "rascacielos"]),
+    ("staircase", "build a staircase", ["stair", "steps", "staircase", "escalier", "escalera"]),
+    ("arena", "build an arena with spawn points", ["arena", "map", "battleground", "spawn point", "arène"]),
+    ("tree", "make a tree", ["tree", "forest", "arbre", "árbol", "arbol", "forêt", "bosque"]),
+    ("car", "build a car", ["car", "vehicle", "kart", "voiture", "coche", "véhicule", "vehículo"]),
+    ("remote_event", "create a validated remote event", ["remote", "remoteevent", "fireserver", "client to server", "network", "remoto", "événement distant", "evento remoto"]),
+    ("leaderstats", "add leaderstats with coins", ["leaderstats", "leaderboard", "coins", "cash", "stats", "classement", "pièces", "monedas", "argent", "dinero"]),
+    ("datastore", "save player data with datastores", ["datastore", "save", "load", "data store", "persist", "sauvegard", "guardar", "données", "datos", "charger", "cargar"]),
+    ("ui_hud", "make a HUD with a health bar", ["hud", "ui", "gui", "health bar", "screengui", "button", "interface", "barre de vie", "barra de vida", "bouton", "botón"]),
+    ("npc_patrol", "make an npc that patrols", ["npc", "patrol", "enemy", "pathfinding", "pnj", "ennemi", "enemigo", "patrouill", "patrull"]),
+    ("tween_door", "make a door that tweens open", ["door", "tween", "gate", "porte", "puerta", "portail", "ouvr", "abre", "abrir"]),
+    ("moving_platform", "make a moving platform", ["moving platform", "elevator", "lift", "plateforme mobile", "plataforma móvil", "mobile", "móvil", "movil", "ascenseur", "ascensor"]),
 ]
 
 ANIM_SYNONYMS = {
-    "idle": ["idle", "breathing", "standing"],
-    "walk": ["walk", "walking"],
-    "run": ["run", "sprint", "chase", "running", "fugitive"],
-    "jump": ["jump", "leap"],
-    "punch": ["punch", "fight", "combo", "jab", "hook", "attack", "combat"],
-    "kick": ["kick"],
-    "block": ["block", "guard up", "defend"],
-    "hit": ["hit reaction", "stagger", "get hit", "hurt", "flinch"],
-    "knockdown": ["knockdown", "knock down", "eliminat", "fall", "death", "die", "squid"],
-    "victory": ["victory", "win", "celebrate"],
-    "wave": ["wave", "hello", "greet"],
-    "shucks": ["shucks", "shy", "embarrass", "sheepish", "awkward"],
-    "dance": ["dance", "dancing"],
-    "sit": ["sit", "sitting"],
-    "crouch": ["crouch", "sneak", "stealth"],
+    "idle": ["idle", "breathing", "standing", "repos", "reposo"],
+    "walk": ["walk", "walking", "marche", "marcher", "caminar", "camina"],
+    "run": ["run", "sprint", "chase", "running", "fugitive", "courir", "course", "correr", "carrera"],
+    "jump": ["jump", "leap", "saut", "sauter", "saltar", "salto"],
+    "punch": ["punch", "fight", "combo", "jab", "hook", "attack", "combat", "coup de poing", "poing", "puñetazo", "golpe", "ataque", "attaque"],
+    "kick": ["kick", "coup de pied", "patada"],
+    "block": ["block", "guard up", "defend", "bloquer", "bloquear", "défendre", "defender"],
+    "hit": ["hit reaction", "stagger", "get hit", "hurt", "flinch", "blessé", "herido"],
+    "knockdown": ["knockdown", "knock down", "eliminat", "fall", "death", "die", "squid", "mort", "muerte", "morir", "tomber", "caer"],
+    "victory": ["victory", "win", "celebrate", "victoire", "victoria", "gagner", "ganar", "célébr", "celebrar"],
+    "wave": ["wave", "hello", "greet", "saluer", "saludar", "bonjour", "hola"],
+    "shucks": ["shucks", "shy", "embarrass", "sheepish", "awkward", "timide", "tímido", "gêné", "avergonzado"],
+    "dance": ["dance", "dancing", "danse", "danser", "baile", "bailar"],
+    "sit": ["sit", "sitting", "assis", "asseoir", "sentar"],
+    "crouch": ["crouch", "sneak", "stealth", "accroupi", "agachar", "furtif", "sigilo"],
 }
 
 
@@ -69,7 +69,7 @@ def build_entries(service: GodmodeService | None = None) -> list[dict]:
     intents = [(k, p, kw, False) for k, p, kw in TOOL_INTENTS]
     intents += [(f"anim_{s}", f"make a {s} animation", ANIM_SYNONYMS[s], True) for s in (st["name"] for st in list_styles())]
     for key, prompt, keywords, is_anim in intents:
-        reply = service.chat({"message": prompt, "autonomy": 3})
+        reply = service.chat({"message": prompt, "autonomy": 3, "engine": "tool"})
         reply.pop("thinking", None)  # timings differ per run; the plugin builds its own honest offline trace
         if not reply.get("actions") or not str(reply.get("source", "")).startswith("tool:"):
             raise RuntimeError(f"offline intent {key!r} did not produce a tool response: {reply.get('source')}")

@@ -55,6 +55,17 @@ def test_matcher_routes_common_requests():
         "squid game elimination animation": "anim_knockdown",
         "make a dance emote": "anim_dance",
         "make an npc guard that patrols": "npc_patrol",
+        # French / Spanish
+        "construis une maison": "house",
+        "haz una casa": "house",
+        "fais une porte qui s'ouvre": "tween_door",
+        "quiero guardar los datos del jugador": "datastore",
+        "crée un pnj ennemi qui patrouille": "npc_patrol",
+        "une plateforme mobile": "moving_platform",
+        "fais une animation de danse": "anim_dance",
+        "animación de saltar": "anim_jump",
+        "construye una torre": "tower",
+        "fais une voiture": "car",
     }
     for message, key in cases.items():
         got = match(message)
