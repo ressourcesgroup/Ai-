@@ -13,6 +13,7 @@ local ActionPreview = require(script.ActionPreview)
 local ChatUI = require(script.ChatUI)
 local Context = require(script.Context)
 local HttpClient = require(script.HttpClient)
+local OfflineEngine = require(script.OfflineEngine)
 local Theme = require(script.Theme)
 local Ui = require(script.Ui)
 
@@ -66,6 +67,11 @@ end
 
 local client = HttpClient.new(serverUrl, token)
 
+-- Offline by default: the built-in engine needs no server and no HTTP permission.
+-- `/server on` in the chat switches to the optional local GODMODE server.
+local SETTING_USE_SERVER = "godmode_use_server"
+local useServer = readSetting(SETTING_USE_SERVER) == true
+
 ---------------------------------------------------------------------------
 -- Toolbar button + dock widget
 ---------------------------------------------------------------------------
@@ -115,6 +121,10 @@ local function isLocalUrl(url: string): boolean
 end
 
 local function checkHealth()
+	if not useServer then
+		ui:setStatus("connected", "Offline")
+		return nil
+	end
 	ui:setStatus("checking")
 	local response = client:get("/health")
 	if not response.ok then
@@ -141,6 +151,10 @@ local function checkHealth()
 end
 
 local function verifySource(source: string): (boolean, string)
+	if not useServer then
+		return true, "Offline mode: this script was already verified (structure + security lint) when the plugin was built. "
+			.. "Re-verifying edited code needs the optional server (/server on)."
+	end
 	local response = client:post("/verify", { source = source })
 	if not response.ok then
 		return false, "Verification request failed: " .. tostring(response.error)
@@ -258,7 +272,19 @@ local function sendMessage(text: string)
 		ui:addNotice("error", "Message is too long (" .. tostring(#text) .. " characters; the limit is " .. tostring(MAX_MESSAGE_CHARS) .. ").")
 		return
 	end
-	if not serverCompatible then
+	local command = string.lower(text):match("^/server%s+(%a+)$")
+	if command == "on" or command == "off" then
+		useServer = command == "on"
+		pcall(function()
+			thisPlugin:SetSetting(SETTING_USE_SERVER, useServer)
+		end)
+		ui:addNotice("info", if useServer
+			then "Using the local GODMODE server (start it with `python -m godmode.server`). Falls back to offline if unreachable."
+			else "Offline mode: built-in tools and animations, no server needed.")
+		task.spawn(checkHealth)
+		return
+	end
+	if useServer and not serverCompatible then
 		ui:addNotice("error", "This plugin is too old for the connected server's protocol version. Update the plugin.")
 		return
 	end
@@ -274,14 +300,18 @@ local function sendMessage(text: string)
 			context = Context.collect(),
 			autonomy = autonomy,
 		}
-		local response = client:post("/chat", payload)
-		ui:setBusy(false)
-		if not response.ok then
-			ui:setStatus("disconnected")
-			ui:addNotice("error", "Request failed: " .. tostring(response.error))
-			return
+		local response
+		if useServer then
+			response = client:post("/chat", payload)
+			if not response.ok then
+				ui:addNotice("warning", "Server unreachable (" .. tostring(response.error) .. "); answering offline.")
+				response = { ok = true, body = OfflineEngine.chat(payload) }
+			end
+		else
+			response = { ok = true, body = OfflineEngine.chat(payload) }
 		end
-		ui:setStatus("connected")
+		ui:setBusy(false)
+		ui:setStatus("connected", if useServer then nil else "Offline")
 		local body = response.body
 		local reply = if typeof(body.reply_markdown) == "string" then body.reply_markdown else "(empty reply)"
 		ui:addAssistantMessage(reply)

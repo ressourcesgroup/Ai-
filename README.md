@@ -10,30 +10,24 @@ An independent, from-scratch AI system for Roblox development. It has its own to
 >
 > Making the model genuinely good needs GPU training at larger scale. See [docs/TRAINING_CLOUD.md](docs/TRAINING_CLOUD.md). [docs/STATUS.md](docs/STATUS.md) lists exactly what is tested, experimental or planned.
 
-## Use the Studio plugin
+## Use the Studio plugin (no setup needed)
 
-1. **Install Python 3.10+**, then, in this folder:
-   ```bash
-   pip install torch numpy
-   pip install -e .
-   ```
-2. **Start the GODMODE server** (leave it running):
-   ```bash
-   python -m godmode.server                                   # tools + search only
-   python -m godmode.server --ckpt runs/small-full2/best.pt   # also enable our trained model
-   ```
-3. **Install the plugin.** Copy `plugin/dist/GodmodePlugin.rbxmx` into your Roblox Plugins folder:
+1. **Copy** `plugin/dist/GodmodePlugin.rbxmx` into your Roblox Plugins folder:
    - Windows: `%LOCALAPPDATA%\Roblox\Plugins`
    - macOS: `~/Documents/Roblox/Plugins`
 
-   Or open Studio > Plugins tab > *Plugins Folder*. Restart Studio.
-4. **Open it.** Click **GODMODE** in the Plugins toolbar. When Studio asks whether the plugin may make HTTP requests to `localhost`, allow it.
-5. **Ask it things.** For example:
-   - "build an obby with 10 blue platforms"
-   - "make a sprint animation", "make a punch combo animation", "make an aw shucks emote"
-   - "create a validated remote event for buying items"
-   - "save player data with datastores"
-   - "how do I use TweenService?"
+   Or open Studio > Plugins tab > *Plugins Folder*.
+2. **Restart Studio**, open any place, and click **GODMODE** in the Plugins toolbar.
+3. **Ask it things.** For example: "build an obby", "make a sprint animation", "make an aw shucks emote", "save player data", "add a leaderboard with cash".
+
+The plugin works **offline by default**. It holds 29 pre-verified builds, scripts and animations (14 tools + 15 R15 animation styles) and picks one by keywords.
+
+**Optional server.** It adds custom sizes, counts and colors, answers to questions, code search, and our neural model. To use it:
+1. Run `pip install torch numpy && pip install -e .`
+2. Run `python -m godmode.server --ckpt runs/small-full2/best.pt`
+3. Type `/server on` in the plugin chat, and allow localhost HTTP when Studio asks.
+
+`/server off` returns to offline mode.
 
 Every change is shown as a **preview card first**. Nothing happens until you click **Apply**, each change is a single **Ctrl+Z** undo step, and deletes need a second confirmation. The *autonomy level* (1 Assistant … 5 Research) controls whether it only answers (level 1) or also proposes changes. Every reply says where it came from: `tool:…`, `retrieval`, or `model:…`.
 
