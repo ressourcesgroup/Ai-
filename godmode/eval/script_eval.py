@@ -8,8 +8,11 @@ For fresh prompts (new seed, so new names/numbers/phrasings) from the training f
 * ``placed``    - the returned code starts with a valid placement header
 * ``class_ok``  - that header names the same script class as the reference solution
 * ``service_recall`` - fraction of the reference's ``game:GetService`` services the code also uses
-* ``complete``  - verified and class_ok and service_recall >= 0.5 (a strict, cheap proxy for
-  "a whole script for this task", not a proof that it runs correctly in Roblox)
+* ``api_recall`` - fraction of the reference's task-specific Roblox API names (``Instance.new``
+  classes and capitalised members such as ``.WalkSpeed``, ``BillboardGui``) the code also uses;
+  catches "a valid script for a *different* task" (e.g. a katana when a speed pad was asked)
+* ``complete``  - verified and class_ok and service_recall >= 0.5 and api_recall >= 0.5 (a strict,
+  cheap proxy for "a whole script for this task", not a proof that it runs correctly in Roblox)
 
 These are proxies measured by code, not playtests. Results are written as JSON.
 """
@@ -26,10 +29,22 @@ from ..server.model_backend import ModelBackend, parse_placement
 from ..server.thinking import resolve_level
 
 _SERVICE = re.compile(r'GetService\(\s*"(\w+)"\s*\)')
+_NEW = re.compile(r'Instance\.new\(\s*"(\w+)"')
+_MEMBER = re.compile(r'[.:]([A-Z]\w+)')
+# members so common in every script that they say nothing about the task
+_GENERIC = {"GetService", "Connect", "Parent", "Name", "new", "Players", "Character", "Humanoid", "Destroy",
+            "FindFirstChild", "WaitForChild", "FindFirstChildOfClass", "LocalPlayer", "PlayerAdded",
+            "CharacterAdded", "Wait", "fromRGB", "Size", "Position", "Anchored", "Color", "Material",
+            "Touched", "GetPlayerFromCharacter", "CanCollide", "Text", "Value", "Enum", "Workspace"}
 
 
 def services(code: str) -> set[str]:
     return set(_SERVICE.findall(code or ""))
+
+
+def api_names(code: str) -> set[str]:
+    code = code or ""
+    return (set(_NEW.findall(code)) | set(_MEMBER.findall(code))) - _GENERIC
 
 
 def score(code: str | None, reference: str) -> dict:
@@ -38,8 +53,11 @@ def score(code: str | None, reference: str) -> dict:
     ref_svc = services(reference)
     recall = (len(services(code) & ref_svc) / len(ref_svc)) if (code and ref_svc) else (1.0 if code else 0.0)
     class_ok = bool(place and ref_place and place[0] == ref_place[0])
+    ref_api = api_names(reference)
+    api = (len(api_names(code) & ref_api) / len(ref_api)) if (code and ref_api) else (1.0 if code else 0.0)
     return {"verified": code is not None, "placed": place is not None, "class_ok": class_ok,
-            "service_recall": round(recall, 3), "complete": bool(code and class_ok and recall >= 0.5)}
+            "service_recall": round(recall, 3), "api_recall": round(api, 3),
+            "complete": bool(code and class_ok and recall >= 0.5 and api >= 0.5)}
 
 
 def eval_prompts(per_family: int = 1, held_per_family: int = 3, seed: int = 9999) -> list[dict]:
@@ -58,7 +76,7 @@ def summarize(rows: list[dict]) -> dict:
             continue
         n = len(rs)
         out[split] = {"n": n, **{k: round(sum(r[k] for r in rs) / n, 3)
-                                 for k in ("verified", "placed", "class_ok", "complete", "service_recall")},
+                                 for k in ("verified", "placed", "class_ok", "complete", "service_recall", "api_recall")},
                       "mean_seconds": round(sum(r["seconds"] for r in rs) / n, 2)}
     return out
 
@@ -82,6 +100,17 @@ def run(ckpt: str, level: str = "low", per_family: int = 1, held_per_family: int
             f"complete={row['complete']!s:5s} {row['seconds']}s")
     return {"checkpoint": ckpt, "prompt_style": backend.prompt_style, "level": lv.id, "seed": seed,
             "summary": summarize(rows), "rows": rows}
+
+
+def rescore(path: str, per_family: int = 1, held_per_family: int = 3, seed: int = 9999) -> dict:
+    """Re-score a saved result file with the current ``score`` (prompts are regenerated deterministically)."""
+    r = json.loads(Path(path).read_text())
+    refs = {(p["split"], p["prompt"]): p["reference"] for p in eval_prompts(per_family, held_per_family, seed)}
+    for row in r["rows"]:
+        row.update(score(row["code"], refs[(row["split"], row["prompt"])]))
+    r["summary"] = summarize(r["rows"])
+    Path(path).write_text(json.dumps(r, indent=2))
+    return r["summary"]
 
 
 def main(argv=None) -> int:

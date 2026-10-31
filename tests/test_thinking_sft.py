@@ -219,7 +219,15 @@ def test_script_eval_scoring():
 
     ref = '-- Script in ServerScriptService: x\nlocal P = game:GetService("Players")\nlocal R = game:GetService("RunService")\n'
     good = '-- Script in ServerScriptService: y\nlocal P = game:GetService("Players")\nprint(P)\n'
-    assert score(good, ref) == {"verified": True, "placed": True, "class_ok": True, "service_recall": 0.5, "complete": True}
+    assert score(good, ref) == {"verified": True, "placed": True, "class_ok": True, "service_recall": 0.5,
+                                "api_recall": 1.0, "complete": True}
+    # a valid script for a different task must not count as complete
+    pad = ('-- Script in ServerScriptService: pad\nlocal P = game:GetService("Players")\n'
+           'local pad = Instance.new("Part")\npad.Material = Enum.Material.Neon\nh.WalkSpeed = 40\n')
+    katana = ('-- Script in ServerScriptService: katana\nlocal P = game:GetService("Players")\n'
+              'local t = Instance.new("Tool")\nt.RequiresHandle = true\n')
+    off = score(katana, pad)
+    assert off["class_ok"] and off["service_recall"] == 1.0 and off["api_recall"] < 0.5 and not off["complete"]
     wrong = '-- LocalScript in StarterGui: y\nprint(1)\n'
     s = score(wrong, ref)
     assert s["placed"] and not s["class_ok"] and not s["complete"]
