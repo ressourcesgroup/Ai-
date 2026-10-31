@@ -4,7 +4,8 @@ This is deliberately NOT the neural model. It is a transparent rule table so
 that every routing decision can be explained and tested. Scores are summed
 pattern weights (plus a bonus for an explicit build/make verb) capped at 1.0;
 a tool intent needs >= TOOL_THRESHOLD to fire, otherwise the message falls
-through to retrieval (questions) or the model (free-form code requests).
+through to retrieval (questions) or the model (free-form code requests, including any
+"make/add/create ..." request no tool covers).
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ RULES: dict[str, list[tuple[str, float]]] = {
     "tween_door": [(r"\bdoors?\b", 0.85), (r"\bgate\b", 0.5)],
     "moving_platform": [(r"\bmoving platforms?\b", 0.95), (r"\bplatforms? that moves?\b", 0.9), (r"\belevator\b", 0.8),
                         (r"\blift\b", 0.5)],
-    "build_obby": [(r"\bobby\b", 0.95), (r"\bobstacle course\b", 0.95), (r"\bparkour\b", 0.8), (r"\bkill ?bricks?\b", 0.7),
+    "build_obby": [(r"\bobby\b", 0.95), (r"\bobstacle course\b", 0.95), (r"\bparkour\b", 0.8), (r"\bkill ?bricks?\b", 0.25),
                    (r"\blava\b", 0.4)],
     "build_house": [(r"\bhouses?\b", 0.9), (r"\b(home|cabin|hut|cottage)\b", 0.7), (r"\broom\b", 0.6), (r"\bbuilding\b", 0.5)],
     "build_tower": [(r"\btowers?\b", 0.9), (r"\bskyscraper\b", 0.8)],
@@ -115,7 +116,8 @@ def route(message: str, context: dict | None = None) -> Intent:
         return Intent("question", conf, params, scores)
     if best_score >= TOOL_THRESHOLD:
         return Intent(best, min(1.0, best_score), params, scores)
-    if re.search(CODE_WORDS, text):
+    if re.search(CODE_WORDS, text) or verb:
+        # no verified tool fits, but it asks for something to be made: the neural model writes it
         return Intent("freeform_code", 0.5, params, scores)
     if question or text.endswith("?"):
         return Intent("question", 0.5, params, scores)

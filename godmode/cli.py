@@ -148,6 +148,28 @@ def _system_adapter(ckpt: str | None):
     return answer
 
 
+def cmd_sft(args) -> None:
+    import random as _random
+
+    from .data.script_families import FAMILIES, HELD_OUT_FAMILIES, generate
+    from .train.sft import SFTConfig, run_sft
+
+    train_fams = [f for f in FAMILIES if f not in HELD_OUT_FAMILIES]
+    samples, rejected = generate(args.per_family, seed=args.seed, families=train_fams)
+    held, _ = generate(max(4, args.per_family // 4), seed=args.seed + 1000, families=list(HELD_OUT_FAMILIES))
+    rng = _random.Random(args.seed)
+    rng.shuffle(samples)
+    n_val = max(16, len(samples) // 20)
+    pairs = [(s.prompt, s.solution) for s in samples]
+    cfg = SFTConfig(init_from=args.init_from, out_dir=args.out, max_seq_len=args.max_seq_len, steps=args.steps,
+                    batch_size=args.batch_size, lr=args.lr, eval_every=args.eval_every, seed=args.seed,
+                    threads=args.threads)
+    print(f"sft data: {len(samples)} verified samples ({rejected} rejected) from {len(train_fams)} families; "
+          f"held-out families {list(HELD_OUT_FAMILIES)}")
+    m = run_sft(cfg, pairs[n_val:], pairs[:n_val], [(s.prompt, s.solution) for s in held])
+    print(json.dumps({k: v for k, v in m.items() if k != "history"}, indent=2))
+
+
 def cmd_grib(args) -> None:
     from .eval import grib
 
@@ -261,6 +283,19 @@ def main(argv: list[str] | None = None) -> None:
     g.add_argument("--top-k", type=int, default=40)
     g.add_argument("--seed", type=int, default=0)
     g.set_defaults(fn=cmd_generate)
+
+    sf = sub.add_parser("sft", help="supervised fine-tune on verified prompt->full-script pairs (assistant-only loss)")
+    sf.add_argument("--init-from", default="runs/small-full2/best.pt")
+    sf.add_argument("--out", default="runs/sft-scripts")
+    sf.add_argument("--per-family", type=int, default=40)
+    sf.add_argument("--max-seq-len", type=int, default=768)
+    sf.add_argument("--steps", type=int, default=1500)
+    sf.add_argument("--batch-size", type=int, default=16)
+    sf.add_argument("--lr", type=float, default=6e-4)
+    sf.add_argument("--eval-every", type=int, default=100)
+    sf.add_argument("--threads", type=int, default=0)
+    sf.add_argument("--seed", type=int, default=0)
+    sf.set_defaults(fn=cmd_sft)
 
     r = sub.add_parser("grib", help="run the GRIB benchmark")
     r.add_argument("--adapter", default="reference", help="reference | empty | ckpt:<path> | system[:<ckpt>]")

@@ -172,7 +172,7 @@ def test_bm25_ranks_and_caches(corpus, tmp_path):
 
 def test_prompt_styles():
     assert render_prompt("make a part\nred") == "-- make a part\n-- red\n"
-    assert render_prompt("x", "chat") == "<|user|>x\n<|assistant|>"
+    assert render_prompt("x", "chat") == "<|bos|><|user|>x\n<|assistant|>"
     assert postprocess("local a = 1\nprint(a)\n\nlocal junk = 2", "comment") == "local a = 1\nprint(a)"
     assert postprocess("if x then\n\n\tprint(1)\nend<|eos|>zz", "comment") == "if x then\n\n\tprint(1)\nend"
     with pytest.raises(ValueError):

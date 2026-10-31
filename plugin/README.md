@@ -9,11 +9,12 @@ applies it **only when you click Apply**. The wire contract is
 plugin/
   src/                 Luau sources (--!strict)
     Main.luau            entry Script: toolbar button, dock widget, settings, request flow
-    ChatUI.luau          message list, bubbles, input, autonomy dropdown, status, settings panel
-    Markdown.luau        markdown-lite: fenced code -> monospace blocks, **bold**, `code`
+    ChatUI.luau          header, message list, thinking blocks, composer, empty state, settings view
+    Markdown.luau        markdown-lite: headings, fenced code panels, **bold**, *italic*, `code`, lists
+    OfflineEngine.luau   serverless replies from OfflineData.luau (pre-verified builds)
     HttpClient.luau      HttpService:RequestAsync in pcall, timeout, friendly errors
     Context.luau         Selection:Get() + StudioService.ActiveScript -> request context
-    ActionPreview.luau   one card per proposed action (preview, diff, verification, Apply/Reject)
+    ActionPreview.luau   one card per proposed action (preview, diff, checks badge, Apply/Discard)
     ActionApplier.luau   applies actions, one ChangeHistoryService recording per action
     PropertyDecoder.luau JSON property encoding -> Roblox values (allow-listed types only)
     PathResolver.luau    dot paths <-> instances, restricted to normal game services
@@ -39,11 +40,54 @@ python -m godmode.server                 # http://127.0.0.1:8765
 python -m godmode.server --token SECRET  # optional shared secret
 ```
 
-If you use `--token`, open the panel's **Settings**, paste the same token and click
-**Save & Reconnect** (it is sent as the `X-Godmode-Token` header). The server URL is
-also set there. Both are stored with `plugin:SetSetting` on this computer (the token is
-stored in plain text in Studio's plugin settings; use a throwaway local token).
-The plugin warns you if you point it at a non-local URL.
+Open **Settings** (the gear in the header):
+
+* **Mode** - *Offline* (default; built-in pre-verified builds, no HTTP at all) or
+  *Online* (every message goes to `<Server URL>/chat`; if the server cannot be reached
+  the reply comes from the offline engine and a notice says so). The chat command
+  `/server on` / `/server off` still works and flips the same setting.
+* **Server URL** - default `http://127.0.0.1:8765`; `https://` URLs are accepted.
+  All requests (`/health`, `/chat`, `/verify`) use this base URL.
+* **Access token** - only if you started the server with `--token` (sent as the
+  `X-Godmode-Token` header).
+* **Test connection** calls `GET <url>/health` and shows the server version, protocol
+  and whether a model is loaded. **Save** stores the URL and token.
+
+Mode, URL, token, autonomy and thinking level are stored with `plugin:SetSetting` on
+this computer (the token in plain text in Studio's plugin settings; use a throwaway
+local token). The plugin warns you if you point it at a non-local URL.
+
+## The panel
+
+```
++-------------------------------------------+
+| GODMODE  (o Online · 127.0.0.1:8765) [⚙][+]|
+|-------------------------------------------|
+|                   [ make a leaderboard ]  |  you (right-aligned bubble)
+| ▸ Thought for 0.3s · 5 steps · Medium     |  collapsed; click to see steps
+| ## Leaderboard                            |  assistant reply, full width
+| Adds `leaderstats` with **Coins** ...     |
+| +-- luau ------------- Select  Insert --+ |  dark code panel
+| +---------------------------------------+ |
+| (tool:leaderboard) (✓ 3/3 checks)         |  source + verification chips
+| +- CREATE_SCRIPT  Leaderboard ----------+ |  action card
+| | ✓ 3/3 checks ▸   [Apply] [Discard]    | |
+|-------------------------------------------|
+| Ask GODMODE...                            |  grows to ~6 lines
+| [Thinking: Medium ▾] [A2 ▾]       [Send]  |
++-------------------------------------------+
+```
+
+* **+** starts a new chat (clears messages and history). An empty chat shows four
+  starter prompts.
+* **Enter** sends, **Shift+Enter** inserts a newline.
+* **Thinking** picks Low / Medium / High / Extra high / Max (sent as `thinking`;
+  default Medium). Offline, the level is echoed but changes nothing.
+* **A1-A5** is the autonomy level (see below).
+* **Select** on a code panel selects the text so Ctrl+C copies it (plugins cannot
+  write the clipboard). **Insert** creates `ServerScriptService.GodmodeSnippet` from the
+  block through the normal apply path (one undo step).
+* Destructive cards are outlined red and need **Delete...** then **Confirm delete**.
 
 ## Allow HTTP
 
@@ -51,9 +95,10 @@ The first request makes Studio ask whether the GODMODE plugin may send HTTP requ
 to `127.0.0.1`. Choose **Allow**. If you dismissed the prompt, open
 **Plugins > Manage Plugins**, find GODMODE and allow its HTTP access. The protocol
 also asks for **Game Settings > Security > Allow HTTP Requests** to be on. When a
-request is blocked the panel shows these steps instead of a raw error. The status dot
-in the header shows the last `/health` result (green online, red offline; click the
-text to re-check). It is polled every 30 s while the panel is open.
+request is blocked the panel shows these steps instead of a raw error. In Online mode
+the header chip shows the last `/health` result (green `Online · host`, red
+`Unreachable`; click it to re-check). It is polled every 30 s while the panel is open.
+Offline mode makes no HTTP requests, so no prompt appears.
 
 ## Usage examples
 
@@ -67,7 +112,8 @@ text to re-check). It is polled every 30 s while the panel is open.
 * *"create a validated remote event for buying items"* - script cards with a source
   preview and the server's structure/lint verification; **Re-verify** calls `/verify`.
 * *"what does task.defer do?"* - a text answer only. Every reply shows its `source`
-  (`tool:...`, `retrieval`, `model:...`, `verifier`, `router`, `none`).
+  as a chip under the reply (`tool:...`, `retrieval`, `model:...`, `verifier`,
+  `router`, `none`, `offline:...`).
 
 Selected instances (paths, class names) and the active script's source are sent as
 context, so "review my open script" or "delete the selected part" work.
@@ -92,6 +138,23 @@ At every level:
   the chat says *Did NOT apply ...* with the exact error. Success is only reported
   after the operation actually completed.
 * Created instances are selected after applying.
+
+## Protocol additions
+
+These extend protocol v1 in a backward-compatible way (all fields optional; the
+authoritative contract is still `docs/PLUGIN_PROTOCOL.md`):
+
+* **`POST /chat` request** gains `thinking`: one of `"low"`, `"medium"`, `"high"`,
+  `"xhigh"`, `"max"` (default `"medium"`). Sent in both modes; the offline engine
+  receives it too.
+* **`POST /chat` response** may include
+  `thinking: {level, summary, elapsed_ms, steps: [{label, detail, ms}]}`. When present
+  the panel renders a collapsed "Thought for Xs · N steps" block; when absent, no block.
+  The offline engine always returns one describing what it actually did (read request,
+  keyword scores, which pre-verified build it picked) and says the level has no effect.
+* **`GET /health`** may include `thinking_levels: [{id, label, description}]`. Known
+  ids update the picker's labels and tooltips; unknown ids are ignored. If absent the
+  built-in descriptions are used.
 
 ## Security model
 
@@ -130,6 +193,7 @@ without Studio, so it is *structurally verified only*. `tests/test_plugin.py` ch
   Studio internals.
 
 **Not verified:** Luau type-checking (`--!strict` analysis), runtime behaviour of any
-Roblox API call, the UI layout and theming, the Studio HTTP permission prompt text,
+Roblox API call, the UI layout and theming (including bubble wrapping, the auto-growing
+composer, Enter/Shift+Enter detection and smooth scrolling), the Studio HTTP permission prompt text,
 `ScriptEditorService` behaviour with open/Team Create scripts, and how the built
 animations actually look. Please report issues found in Studio.

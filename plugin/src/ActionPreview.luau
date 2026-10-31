@@ -1,5 +1,5 @@
 --!strict
--- ActionPreview: one card per proposed action, with Apply / Reject buttons.
+-- ActionPreview: one card per proposed action, with Apply / Discard buttons.
 --
 -- Cards show the action type, target path, a summary (script preview, diff,
 -- instance outline, animation summary) and the server's verification results.
@@ -18,7 +18,7 @@ local PREVIEW_LINES = 20
 local DIFF_LINES = 40
 local OUTLINE_LINES = 30
 
-export type CardState = "pending" | "applying" | "applied" | "failed" | "rejected"
+export type CardState = "pending" | "applying" | "applied" | "failed" | "discarded"
 
 export type Options = {
 	verification: { any },
@@ -146,21 +146,47 @@ local function addLabel(parent: Instance, text: string, order: number, colorFn: 
 	return label
 end
 
+-- A "✓ n/m checks" badge; clicking it shows / hides the individual checks.
 local function addVerification(parent: Instance, checks: { any }, order: number)
 	if #checks == 0 then
 		return
 	end
 	local lines: { string } = {}
-	local allOk = true
+	local passed = 0
 	for _, entry in ipairs(checks) do
 		local ok = entry.ok == true
-		allOk = allOk and ok
+		if ok then
+			passed += 1
+		end
 		local detail = if typeof(entry.detail) == "string" and entry.detail ~= "" then " - " .. entry.detail else ""
 		table.insert(lines, (if ok then "PASS " else "FAIL ") .. entry.check .. detail)
 	end
-	addLabel(parent, "Server verification:\n" .. table.concat(lines, "\n"), order, if allOk then Theme.success else Theme.error, {
-		TextSize = 13,
+	local allOk = passed == #checks
+	local colorFn = if allOk then Theme.success else Theme.error
+	local row = Ui.row(6, { LayoutOrder = order, Name = "Verification" })
+	row.Parent = parent
+	local badge = Ui.create("TextButton", {
+		Size = UDim2.fromOffset(0, 20),
+		AutomaticSize = Enum.AutomaticSize.X,
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		Font = Theme.FONT_MEDIUM,
+		TextSize = Ui.SMALL_TEXT,
+		Text = (if allOk then "✓ " else "✕ ") .. tostring(passed) .. "/" .. tostring(#checks) .. " checks  ▸",
+		Parent = row,
+	}, { Ui.corner(10), Ui.padding(0, 8) }) :: TextButton
+	Theme.paint(badge, "BackgroundColor3", Theme.subtle)
+	Theme.paint(badge, "TextColor3", colorFn)
+	local details = addLabel(parent, table.concat(lines, "\n"), order + 1, colorFn, {
+		TextSize = 12,
+		Font = Theme.FONT_MONO,
+		Visible = false,
 	})
+	badge.MouseButton1Click:Connect(function()
+		details.Visible = not details.Visible
+		badge.Text = (if allOk then "✓ " else "✕ ") .. tostring(passed) .. "/" .. tostring(#checks)
+			.. " checks  " .. (if details.Visible then "▾" else "▸")
+	end)
 end
 
 local function describe(card: CardData, body: Frame)
@@ -231,7 +257,7 @@ local function describe(card: CardData, body: Frame)
 			then target.ClassName .. " with " .. tostring(#target:GetDescendants()) .. " descendant(s)"
 			else "target not found"
 		addLabel(body, "DESTRUCTIVE: deletes " .. tostring(action.path) .. " (" .. detail .. "). Undo (Ctrl+Z) can restore it.", order, Theme.danger, {
-			Font = Enum.Font.SourceSansBold,
+			Font = Theme.FONT_BOLD,
 		})
 	else
 		addLabel(body, "Unsupported action type '" .. tostring(kind) .. "'; it cannot be applied.", order, Theme.error)
@@ -245,20 +271,28 @@ function ActionPreview.new(action: any, options: Options): Card
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BorderSizePixel = 0,
-	}, { Ui.corner(6), Ui.padding(8), Ui.vlist(6) }) :: Frame
-	Theme.paint(frame, "BackgroundColor3", Theme.assistantBubble)
-	local stroke = Ui.stroke(if destructive then Theme.danger else Theme.border)
+	}, { Ui.corner(8), Ui.padding(10), Ui.vlist(6) }) :: Frame
+	Theme.paint(frame, "BackgroundColor3", Theme.raised)
+	local stroke = Ui.stroke(if destructive then Theme.danger else Theme.hairline)
 	if destructive then
 		(stroke :: UIStroke).Thickness = 2
 	end
 	stroke.Parent = frame
 
 	local kind = if typeof(action) == "table" then action.type else nil
-	local title = (TYPE_TITLES[kind] or tostring(kind)) .. ": " .. ActionApplier.targetPath(action)
-	addLabel(frame, title, 1, nil, { Font = Enum.Font.SourceSansBold })
+	-- Header: type pill, then the title (action name or target), then the
+	-- description and the full target path in monospace.
+	local pillRow = Ui.row(6, { LayoutOrder = 1 })
+	pillRow.Parent = frame
+	local pill = Ui.chip(string.upper(TYPE_TITLES[kind] or tostring(kind)), if destructive then Theme.danger else Theme.accent)
+	pill.Parent = pillRow
+	local target = ActionApplier.targetPath(action)
+	local name = if typeof(action) == "table" and typeof(action.name) == "string" then action.name else target:match("([^%.]+)$")
+	addLabel(frame, name or target, 2, nil, { Font = Theme.FONT_BOLD, TextSize = 15 })
 	if typeof(action) == "table" and typeof(action.description) == "string" then
-		addLabel(frame, action.description, 2, nil, { TextSize = 14 })
+		addLabel(frame, action.description, 3, nil, { TextSize = 14 })
 	end
+	addLabel(frame, target, 4, Theme.dimText, { TextSize = 12, Font = Theme.FONT_MONO })
 
 	local buttons = Ui.create("Frame", {
 		Name = "Buttons",
@@ -306,20 +340,20 @@ function ActionPreview.showDefaultButtons(self: Card)
 	local action = self.action
 	local supported = typeof(action) == "table" and table.find(ActionApplier.SUPPORTED_ACTIONS, action.type) ~= nil
 	if not supported then
-		self.state = "rejected"
+		self.state = "discarded"
 		self:setStatus("Skipped: unsupported action.", Theme.warning)
 		return
 	end
 
 	if ActionApplier.isDestructive(action) then
-		local deleteButton = Ui.button("Delete...", "danger", 90)
+		local deleteButton = Ui.button("Delete…", "danger")
 		deleteButton.LayoutOrder = 1
 		deleteButton.Parent = self.buttons
 		deleteButton.MouseButton1Click:Connect(function()
 			self:showConfirmButtons()
 		end)
 	else
-		local applyButton = Ui.button("Apply", "primary", 80)
+		local applyButton = Ui.button("Apply", "primary")
 		applyButton.LayoutOrder = 1
 		applyButton.Parent = self.buttons
 		applyButton.MouseButton1Click:Connect(function()
@@ -327,19 +361,19 @@ function ActionPreview.showDefaultButtons(self: Card)
 		end)
 	end
 
-	local rejectButton = Ui.button("Reject", "normal", 70)
-	rejectButton.LayoutOrder = 2
-	rejectButton.Parent = self.buttons
-	rejectButton.MouseButton1Click:Connect(function()
-		self.state = "rejected"
+	local discardButton = Ui.button("Discard", "secondary")
+	discardButton.LayoutOrder = 2
+	discardButton.Parent = self.buttons
+	discardButton.MouseButton1Click:Connect(function()
+		self.state = "discarded"
 		self:clearButtons()
-		self:setStatus("Rejected. Nothing was changed.", Theme.dimText)
+		self:setStatus("Discarded. Nothing was changed.", Theme.dimText)
 	end)
 
 	local source = if action.type == "create_script" then action.source elseif action.type == "edit_script" then action.new_source else nil
 	local onVerify = self.options.onVerify
 	if typeof(source) == "string" and onVerify then
-		local verifyButton = Ui.button("Re-verify", "normal", 80)
+		local verifyButton = Ui.button("Re-verify", "ghost")
 		verifyButton.LayoutOrder = 3
 		verifyButton.Parent = self.buttons
 		verifyButton.MouseButton1Click:Connect(function()
@@ -355,13 +389,13 @@ end
 function ActionPreview.showConfirmButtons(self: Card)
 	self:clearButtons()
 	self:setStatus("This permanently removes " .. ActionApplier.targetPath(self.action) .. " from the place (Undo can restore it). Are you sure?", Theme.danger)
-	local confirmButton = Ui.button("Confirm delete", "danger", 120)
+	local confirmButton = Ui.button("Confirm delete", "danger")
 	confirmButton.LayoutOrder = 1
 	confirmButton.Parent = self.buttons
 	confirmButton.MouseButton1Click:Connect(function()
 		self:apply()
 	end)
-	local cancelButton = Ui.button("Cancel", "normal", 70)
+	local cancelButton = Ui.button("Cancel", "secondary")
 	cancelButton.LayoutOrder = 2
 	cancelButton.Parent = self.buttons
 	cancelButton.MouseButton1Click:Connect(function()

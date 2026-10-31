@@ -17,7 +17,9 @@ import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .model_backend import PROMPT_STYLES, ModelBackend
+from pathlib import Path
+
+from .model_backend import STYLE_CHOICES, ModelBackend
 from .retrieval import Retriever
 from .service import BadRequest, GodmodeService
 
@@ -139,16 +141,32 @@ def serve_in_thread(httpd: ThreadingHTTPServer) -> threading.Thread:
     return t
 
 
+CHECKPOINT_CANDIDATES = ("runs/sft-scripts/best.pt", "runs/small-full2/best.pt")
+
+
+def default_checkpoint() -> str | None:
+    """The instruction-tuned checkpoint if it exists, else the pretrained one, else None (tools still work)."""
+    root = Path(__file__).resolve().parents[2]
+    for rel in CHECKPOINT_CANDIDATES:
+        for base in (Path.cwd(), root):
+            if (base / rel).exists():
+                return str(base / rel)
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m godmode.server", description="GODMODE local inference/agent server")
-    ap.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1; keep it local)")
-    ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--ckpt", default=os.environ.get("GODMODE_CKPT"), help="model checkpoint (or env GODMODE_CKPT)")
+    ap.add_argument("--host", default=os.environ.get("GODMODE_HOST", "127.0.0.1"),
+                    help="bind address (default 127.0.0.1; use 0.0.0.0 only behind a token, e.g. online hosting)")
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8765)))
+    ap.add_argument("--ckpt", default=os.environ.get("GODMODE_CKPT") or default_checkpoint(),
+                    help="model checkpoint (or env GODMODE_CKPT; default: the newest trained checkpoint found)")
     ap.add_argument("--token", default=os.environ.get("GODMODE_TOKEN"), help="require X-Godmode-Token")
     ap.add_argument("--best-of", type=int, default=4, help="model samples per request (best verified wins)")
     ap.add_argument("--max-new-tokens", type=int, default=256)
     ap.add_argument("--temperature", type=float, default=0.8)
-    ap.add_argument("--prompt-style", choices=PROMPT_STYLES, default="comment")
+    ap.add_argument("--prompt-style", choices=STYLE_CHOICES, default="auto",
+                    help="auto = chat format for instruction-tuned (SFT) checkpoints, comment format otherwise")
     ap.add_argument("--corpus", action="append", default=None,
                     help="corpus directory for retrieval (repeatable; default seed + external corpus)")
     ap.add_argument("--verbose", action="store_true")

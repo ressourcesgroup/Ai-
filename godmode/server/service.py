@@ -10,8 +10,9 @@ import json
 from godmode.anim import list_styles
 from godmode.tools import TOOL_TAGS, TOOLS, ToolError, route, run_tool, verify_source
 
-from .model_backend import ModelBackend
+from .model_backend import ModelBackend, parse_placement
 from .retrieval import Retriever
+from .thinking import Trace, list_levels, resolve_level
 
 VERSION = "0.1.0"
 PROTOCOL_VERSION = 1
@@ -46,7 +47,8 @@ class GodmodeService:
                     "animation_styles": [s["name"] for s in list_styles()],
                     "retrieval": self.retriever.status(),
                     "model": self.model.tag,
-                }}
+                },
+                "thinking_levels": list_levels()}
 
     def verify(self, body: dict) -> dict:
         src = body.get("source")
@@ -75,21 +77,38 @@ class GodmodeService:
         context = body.get("context") or {}
         if not isinstance(context, dict):
             raise BadRequest("'context' must be an object")
+        try:
+            level = resolve_level(body.get("thinking"))
+        except ValueError as e:
+            raise BadRequest(str(e)) from None
+        trace = Trace(level)
         intent = route(message, context)
+        trace.step("Understand request", f"router intent '{intent.name}' (confidence {intent.confidence:.2f})")
 
         if intent.name in TOOLS:
             resp = self._tool(intent, message, context)
+            trace.step("Run generator", f"tool:{TOOL_TAGS[intent.name]} - "
+                       f"{sum(v['ok'] for v in resp['verification'])}/{len(resp['verification'])} checks passed")
+            summary = f"Used the verified tool:{TOOL_TAGS[intent.name]} generator (thinking level does not change it)."
         elif intent.name == "help":
             resp = self._help()
+            summary = "Showed the help text."
         elif intent.name == "question":
-            resp = self._retrieval(message, intent)
+            resp = self._retrieval(message, intent, level.retrieval_k)
+            trace.step("Search corpus", f"BM25 over the licensed corpus, top {level.retrieval_k}: "
+                       f"{len(resp.get('citations', []))} hit(s)")
+            summary = f"Retrieved {len(resp.get('citations', []))} cited example(s)."
         elif intent.name == "freeform_code":
-            resp = self._model(message)
+            resp = self._model(message, level, trace)
+            summary = resp.pop("summary")
         else:
             resp = self._unknown()
+            summary = "No matching tool or code request recognised."
 
         resp["intent"] = intent.to_json()
-        return self._finalize(resp, autonomy)
+        out = self._finalize(resp, autonomy)
+        out["thinking"] = trace.to_json(summary)
+        return out
 
     # ------------------------------------------------------------ handlers
 
@@ -134,8 +153,8 @@ class GodmodeService:
                 "'make an obby with 10 platforms', 'add a datastore save system', 'make a wave animation', or ask "
                 "'how do I use TweenService?'. Type `help` for the full list."}
 
-    def _retrieval(self, message: str, intent) -> dict:
-        hits = self.retriever.search(message, k=3)
+    def _retrieval(self, message: str, intent, k: int = 3) -> dict:
+        hits = self.retriever.search(message, k=k)
         body = ("**Source:** `retrieval` - BM25 keyword search over the licensed Luau corpus. The snippets below are "
                 "**retrieved examples written by others** (cited), not answers written by GODMODE's model, and may "
                 "only partly answer the question.")
@@ -159,21 +178,32 @@ class GodmodeService:
         return {"source": "retrieval", "actions": [], "verification": [], "warnings": [], "body": body,
                 "citations": [h.to_json() for h in hits]}
 
-    def _model(self, message: str) -> dict:
-        res = self.model.generate_code(message)
+    def _model(self, message: str, level=None, trace=None) -> dict:
+        res = self.model.generate_code(message, level, trace)
         if not res.ok:
             body = (f"**Source:** `{res.source}`. {res.message} No code is returned rather than unverified code. "
-                    "Try rephrasing as a request one of the verified tools covers (type `help`).")
+                    "Try a higher thinking level, rephrase, or use a request one of the verified tools covers (type `help`).")
             return {"source": res.source, "actions": [], "verification": res.verification, "warnings": [res.message],
-                    "body": body}
-        body = (f"**Source:** `{res.source}` - sampled from GODMODE's small neural model (best-of-{res.candidates}). "
-                f"{res.message} Verification means 'plausible and lint-clean', not 'correct': review it carefully.\n\n"
-                f"```lua\n{res.code}\n```\n\nProposed as an inert ModuleScript draft in `ServerStorage`.")
-        action = {"type": "create_script", "description": "Model-generated draft (inert ModuleScript)",
-                  "parent_path": "ServerStorage", "name": "GodmodeModelDraft", "class": "ModuleScript",
-                  "source": res.code, "destructive": False}
+                    "body": body, "summary": res.message}
+        placement = parse_placement(res.code)
+        if placement:
+            cls, parent, name = placement
+            where = f"Proposed as a `{cls}` in `{parent}` (from the script's own placement header)."
+            desc = f"Model-generated {cls}: {name}"
+        else:
+            cls, parent, name = "ModuleScript", "ServerStorage", "GodmodeModelDraft"
+            where = "No placement header, so it is proposed as an inert ModuleScript draft in `ServerStorage`."
+            desc = "Model-generated draft (inert ModuleScript)"
+        if trace is not None:
+            trace.step("Place script", where.replace("`", ""))
+        body = (f"**Source:** `{res.source}` - written by GODMODE's own fine-tuned model (best-of-{res.candidates}). "
+                f"{res.message} Verification means 'parses, lint-clean, plausible', not 'tested in a game': review "
+                f"it before you publish.\n\n```lua\n{res.code}\n```\n\n{where}")
+        action = {"type": "create_script", "description": desc, "parent_path": parent, "name": name, "class": cls,
+                  "source": res.code, "destructive": False, "always_confirm": True}
         return {"source": res.source, "actions": [action], "verification": res.verification,
-                "warnings": ["model output: small model, review before use"], "body": body}
+                "warnings": ["model output: small model, review before use"], "body": body,
+                "summary": f"{res.message}"}
 
     # ------------------------------------------------------------ common
 
@@ -189,7 +219,7 @@ class GodmodeService:
             for i, a in enumerate(actions, 1):
                 a["id"] = f"a{i}"
                 a["destructive"] = bool(a.get("destructive") or a["type"] == "delete_instance")
-                a["requires_approval"] = True if (a["destructive"] or autonomy <= 3) else False
+                a["requires_approval"] = bool(a["destructive"] or autonomy <= 3 or a.pop("always_confirm", False))
             if actions:
                 body += (f"\n\n**Proposed only - nothing has been changed in Studio.** {len(actions)} action(s) await "
                          "your approval in the plugin:\n" + "\n".join(

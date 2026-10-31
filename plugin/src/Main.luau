@@ -27,6 +27,7 @@ local MAX_MESSAGE_CHARS = 8000
 local SETTING_URL = "GodmodeServerUrl"
 local SETTING_TOKEN = "GodmodeToken"
 local SETTING_AUTONOMY = "GodmodeAutonomy"
+local SETTING_THINKING = "GodmodeThinking"
 
 local thisPlugin: Plugin = plugin
 
@@ -65,10 +66,19 @@ if typeof(storedAutonomy) == "number" and storedAutonomy >= 1 and storedAutonomy
 	autonomy = math.floor(storedAutonomy)
 end
 
+local thinkingLevel: string = ChatUI.DEFAULT_THINKING
+local storedThinking = readSetting(SETTING_THINKING)
+for _, level in ipairs(ChatUI.THINKING_LEVELS) do
+	if storedThinking == level.id then
+		thinkingLevel = level.id
+	end
+end
+
+-- Every request goes to the configured base URL (Settings > Server URL).
 local client = HttpClient.new(serverUrl, token)
 
 -- Offline by default: the built-in engine needs no server and no HTTP permission.
--- `/server on` in the chat switches to the optional local GODMODE server.
+-- Settings > Mode (or `/server on|off` in the chat) switches to the optional GODMODE server.
 local SETTING_USE_SERVER = "godmode_use_server"
 local useServer = readSetting(SETTING_USE_SERVER) == true
 
@@ -115,38 +125,45 @@ local function pushHistory(role: string, content: string)
 	end
 end
 
+local function trim(text: string): string
+	return text:match("^%s*(.-)%s*$") or ""
+end
+
 local function isLocalUrl(url: string): boolean
 	local host = url:match("^https?://([^/:]+)")
 	return host == "127.0.0.1" or host == "localhost" or host == "[::1]"
 end
 
+local function hostOf(url: string): string
+	return url:match("^https?://([^/]+)") or url
+end
+
 local function checkHealth()
 	if not useServer then
-		ui:setStatus("connected", "Offline")
+		ui:setStatus("offline")
 		return nil
 	end
 	ui:setStatus("checking")
 	local response = client:get("/health")
 	if not response.ok then
 		serverCompatible = true -- unknown; let /chat report its own error
-		ui:setStatus("disconnected")
+		ui:setStatus("unreachable", "Unreachable · " .. hostOf(serverUrl))
 		return response.error
 	end
 	local body = response.body
 	local protocol = if typeof(body) == "table" then body.protocol_version else nil
 	if typeof(protocol) == "number" and protocol > PROTOCOL_VERSION then
 		serverCompatible = false
-		ui:setStatus("disconnected", "Protocol v" .. tostring(protocol))
+		ui:setStatus("unreachable", "Protocol v" .. tostring(protocol))
 		return "The server speaks protocol v" .. tostring(protocol)
 			.. " but this plugin only understands v" .. tostring(PROTOCOL_VERSION) .. ". Update the plugin."
 	end
 	serverCompatible = true
-	-- The status label is narrow; the model state is only a short suffix.
-	local online = "Online"
-	if typeof(body.model) == "table" and body.model.loaded == true then
-		online = "Online + model"
+	if typeof(body) == "table" then
+		-- Optional: tooltips for the thinking picker.
+		ui:setThinkingLevels(body.thinking_levels)
 	end
-	ui:setStatus("connected", online)
+	ui:setStatus("online", "Online · " .. hostOf(serverUrl))
 	return nil
 end
 
@@ -188,29 +205,6 @@ local function reportResult(action: any, result: ActionApplier.Result)
 		ui:addNotice("success", "Applied " .. label .. ": " .. result.message)
 	else
 		ui:addNotice("error", "Did NOT apply " .. label .. ": " .. result.message)
-	end
-end
-
-local function summariseVerification(verification: { any })
-	if #verification == 0 then
-		return
-	end
-	local passed = 0
-	local failures: { string } = {}
-	for _, entry in ipairs(verification) do
-		if typeof(entry) == "table" then
-			if entry.ok == true then
-				passed += 1
-			else
-				table.insert(failures, tostring(entry.check) .. (if typeof(entry.detail) == "string" then ": " .. entry.detail else ""))
-			end
-		end
-	end
-	local text = "Server verification: " .. tostring(passed) .. "/" .. tostring(#verification) .. " checks passed"
-	if #failures > 0 then
-		ui:addNotice("warning", text .. "\n" .. table.concat(failures, "\n"))
-	else
-		ui:addNotice("info", text .. " (structural check + lint; heuristic, not a compile)")
 	end
 end
 
@@ -267,6 +261,31 @@ local function showActions(actions: { any }, verification: { any })
 	end
 end
 
+-- "Insert" on a code panel: create a Script from the block through the normal
+-- ActionApplier path (one undo step), then report the real outcome.
+local function insertSnippet(code: string, _language: string?)
+	local action = {
+		type = "create_script",
+		class = "Script",
+		name = "GodmodeSnippet",
+		parent_path = "ServerScriptService",
+		source = code,
+	}
+	reportResult(action, ActionApplier.apply(action))
+end
+
+local function setMode(mode: ChatUI.Mode)
+	useServer = mode == "online"
+	writeSetting(SETTING_USE_SERVER, useServer)
+	ui:setMode(mode)
+	task.spawn(function()
+		local err = checkHealth()
+		if err then
+			ui:addNotice("warning", "Online mode, but the server did not answer: " .. tostring(err) .. " Replies will come from the offline engine until it does.")
+		end
+	end)
+end
+
 local function sendMessage(text: string)
 	if #text > MAX_MESSAGE_CHARS then
 		ui:addNotice("error", "Message is too long (" .. tostring(#text) .. " characters; the limit is " .. tostring(MAX_MESSAGE_CHARS) .. ").")
@@ -275,11 +294,10 @@ local function sendMessage(text: string)
 	local command = string.lower(text):match("^/server%s+(%a+)$")
 	if command == "on" or command == "off" then
 		useServer = command == "on"
-		pcall(function()
-			thisPlugin:SetSetting(SETTING_USE_SERVER, useServer)
-		end)
+		writeSetting(SETTING_USE_SERVER, useServer)
+		ui:setMode(if useServer then "online" else "offline")
 		ui:addNotice("info", if useServer
-			then "Using the local GODMODE server (start it with `python -m godmode.server`). Falls back to offline if unreachable."
+			then "Online mode: using the GODMODE server at " .. serverUrl .. " (start it with `python -m godmode.server`). Falls back to offline if unreachable."
 			else "Offline mode: built-in tools and animations, no server needed.")
 		task.spawn(checkHealth)
 		return
@@ -299,6 +317,7 @@ local function sendMessage(text: string)
 			history = historySnapshot,
 			context = Context.collect(),
 			autonomy = autonomy,
+			thinking = thinkingLevel,
 		}
 		local response
 		if useServer then
@@ -311,21 +330,25 @@ local function sendMessage(text: string)
 			response = { ok = true, body = OfflineEngine.chat(payload) }
 		end
 		ui:setBusy(false)
-		ui:setStatus("connected", if useServer then nil else "Offline")
+		if not useServer then
+			ui:setStatus("offline")
+		end
 		local body = response.body
 		local reply = if typeof(body.reply_markdown) == "string" then body.reply_markdown else "(empty reply)"
-		ui:addAssistantMessage(reply)
+		local verification = if typeof(body.verification) == "table" then body.verification else {}
+		ui:addAssistantMessage(reply, {
+			-- Rendered only when the reply carries a thinking object.
+			thinking = body.thinking,
+			source = if typeof(body.source) == "string" then body.source else nil,
+			verification = verification,
+			onInsert = insertSnippet,
+		})
 		pushHistory("assistant", reply)
-		if typeof(body.source) == "string" then
-			ui:addNotice("info", "Source: " .. body.source)
-		end
 		if typeof(body.warnings) == "table" then
 			for _, warning in ipairs(body.warnings) do
 				ui:addNotice("warning", "Warning: " .. tostring(warning))
 			end
 		end
-		local verification = if typeof(body.verification) == "table" then body.verification else {}
-		summariseVerification(verification)
 		local actions = if typeof(body.actions) == "table" then body.actions else {}
 		if #actions > 0 then
 			showActions(actions, verification)
@@ -338,24 +361,43 @@ ui = ChatUI.new(widget, {
 	onAutonomyChanged = function(level: number)
 		autonomy = level
 		writeSetting(SETTING_AUTONOMY, level)
-		ui:addNotice("info", "Autonomy set to " .. tostring(level) .. " - " .. ChatUI.AUTONOMY_LABELS[level] .. ": " .. ChatUI.AUTONOMY_HINTS[level])
 	end,
+	onThinkingChanged = function(id: string)
+		thinkingLevel = id
+		writeSetting(SETTING_THINKING, id)
+	end,
+	onModeChanged = setMode,
 	onSaveSettings = function(url: string, newToken: string)
-		serverUrl = HttpClient.normaliseUrl(if url ~= "" then url else DEFAULT_URL)
-		token = newToken:match("^%s*(.-)%s*$") or ""
+		serverUrl = HttpClient.normaliseUrl(if trim(url) ~= "" then trim(url) else DEFAULT_URL)
+		token = trim(newToken)
 		writeSetting(SETTING_URL, serverUrl)
 		writeSetting(SETTING_TOKEN, token)
 		client = HttpClient.new(serverUrl, token)
 		if not isLocalUrl(serverUrl) then
-			ui:addNotice("warning", "The server URL is not on this computer (" .. serverUrl .. "). Your messages, open script and token will be sent there.")
+			ui:setTestResult("warning", "Saved. " .. serverUrl .. " is not on this computer: your messages, open script and token will be sent there.")
 		end
+		task.spawn(checkHealth)
+	end,
+	onTestConnection = function(url: string, testToken: string)
+		local target = HttpClient.normaliseUrl(if trim(url) ~= "" then trim(url) else DEFAULT_URL)
 		task.spawn(function()
-			local err = checkHealth()
-			if err then
-				ui:addNotice("error", err)
-			else
-				ui:addNotice("success", "Connected to " .. serverUrl)
+			local response = HttpClient.new(target, trim(testToken), 10):get("/health")
+			if not response.ok then
+				ui:setTestResult("error", "Could not reach " .. target .. "/health: " .. tostring(response.error))
+				return
 			end
+			local body = response.body
+			if typeof(body) ~= "table" then
+				ui:setTestResult("error", target .. "/health answered, but not with JSON.")
+				return
+			end
+			local version = if body.version ~= nil then tostring(body.version) else "unknown"
+			local loaded = typeof(body.model) == "table" and body.model.loaded == true
+			local protocol = if typeof(body.protocol_version) == "number" then tostring(body.protocol_version) else "?"
+			ui:setTestResult(if loaded then "success" else "warning", "Connected. Server version " .. version
+				.. " · protocol v" .. protocol .. " · model loaded: " .. (if loaded then "yes" else "no (rule-based replies only)")
+				.. (if isLocalUrl(target) then "" else "\nThis host is not on this computer."))
+			ui:setThinkingLevels(body.thinking_levels)
 		end)
 	end,
 	onRefreshStatus = function()
@@ -366,14 +408,17 @@ ui = ChatUI.new(widget, {
 			end
 		end)
 	end,
-	onClear = function()
+	onNewChat = function()
 		ui:clear()
 		table.clear(history)
 	end,
-}, { url = serverUrl, token = token, autonomy = autonomy })
-
-ui:addNotice("info", "GODMODE proposes changes; nothing in your place changes until you click Apply. "
-	.. "Every applied action is one undo step (Ctrl+Z).")
+}, {
+	url = serverUrl,
+	token = token,
+	autonomy = autonomy,
+	thinking = thinkingLevel,
+	mode = if useServer then "online" else "offline",
+})
 
 ---------------------------------------------------------------------------
 -- Lifecycle: health polling while the widget is open

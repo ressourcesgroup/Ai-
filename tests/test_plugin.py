@@ -236,3 +236,76 @@ def test_path_resolver_refuses_internal_services():
     names = set(re.findall(r"(\w+) = true", allowed.group(1)))
     assert "Workspace" in names and "ServerScriptService" in names
     assert not names & {"CoreGui", "CorePackages", "PluginGuiService", "RobloxReplicatedStorage", "PluginDebugService"}
+
+
+# ---------------------------------------------------------------------------
+# UI redesign: thinking levels, settings persistence, configured server URL
+# ---------------------------------------------------------------------------
+
+THINKING_IDS = ["low", "medium", "high", "xhigh", "max"]
+THINKING_LABELS = ["Low", "Medium", "High", "Extra high", "Max"]
+
+
+def _src(name: str) -> str:
+    return (SRC / f"{name}.luau").read_text(encoding="utf-8")
+
+
+def test_thinking_levels_are_exactly_the_five_ids():
+    chat = _src("ChatUI")
+    block = re.search(r"ChatUI\.THINKING_LEVELS = \{(.*?)\n\} :: ", chat, re.S)
+    assert block, "ChatUI.THINKING_LEVELS table not found"
+    entries = re.findall(r'\{ id = "(\w+)", label = "([^"]+)"', block.group(1))
+    assert [e[0] for e in entries] == THINKING_IDS
+    assert [e[1] for e in entries] == THINKING_LABELS
+    assert 'ChatUI.DEFAULT_THINKING = "medium"' in chat
+
+
+def test_chat_payload_sends_thinking_level():
+    main = _src("Main")
+    assert "thinking = thinkingLevel," in main
+    # A stored value is only accepted when it is one of the five ids.
+    assert "for _, level in ipairs(ChatUI.THINKING_LEVELS) do" in main
+
+
+def test_http_client_uses_configured_base_url():
+    http = _src("HttpClient")
+    assert "self.baseUrl .. path" in http
+    main = _src("Main")
+    assert "HttpClient.new(serverUrl, token)" in main
+    assert "DEFAULT_URL = \"http://127.0.0.1:8765\"" in main
+    # Test connection hits <configured url>/health, not a hard-coded host.
+    assert 'HttpClient.new(target, trim(testToken), 10):get("/health")' in main
+    assert not re.search(r'post\("https?://', main)
+
+
+@pytest.mark.parametrize(
+    "key,name",
+    [
+        ("SETTING_URL", "GodmodeServerUrl"),
+        ("SETTING_TOKEN", "GodmodeToken"),
+        ("SETTING_AUTONOMY", "GodmodeAutonomy"),
+        ("SETTING_THINKING", "GodmodeThinking"),
+        ("SETTING_USE_SERVER", "godmode_use_server"),
+    ],
+)
+def test_settings_are_persisted(key, name):
+    main = _src("Main")
+    assert f'local {key} = "{name}"' in main
+    assert f"readSetting({key})" in main
+    assert f"writeSetting({key}," in main
+
+
+def test_offline_engine_returns_thinking_object():
+    engine = _src("OfflineEngine")
+    assert "thinking level has no effect without the server" in engine
+    # Every return path of chat() attaches the trace.
+    body = engine[engine.index("function OfflineEngine.chat"):]
+    assert body.count("thinking = finish()") >= 3
+    for field in ("level =", "summary =", "elapsed_ms =", "steps ="):
+        assert field in engine
+
+
+def test_thinking_block_only_when_present():
+    chat = _src("ChatUI")
+    assert 'if typeof(thinking) ~= "table" then\n\t\treturn nil' in chat
+    assert "Thought for " in chat

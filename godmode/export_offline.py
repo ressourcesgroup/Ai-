@@ -70,6 +70,7 @@ def build_entries(service: GodmodeService | None = None) -> list[dict]:
     intents += [(f"anim_{s}", f"make a {s} animation", ANIM_SYNONYMS[s], True) for s in (st["name"] for st in list_styles())]
     for key, prompt, keywords, is_anim in intents:
         reply = service.chat({"message": prompt, "autonomy": 3})
+        reply.pop("thinking", None)  # timings differ per run; the plugin builds its own honest offline trace
         if not reply.get("actions") or not str(reply.get("source", "")).startswith("tool:"):
             raise RuntimeError(f"offline intent {key!r} did not produce a tool response: {reply.get('source')}")
         if not all(v.get("ok") for v in reply.get("verification", [])):

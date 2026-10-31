@@ -69,20 +69,61 @@ function Theme.accentText(): Color3
 	return Theme.color(Enum.StudioStyleGuideColor.DialogMainButtonText)
 end
 
+-- Mix two colours: t = 0 gives `a`, t = 1 gives `b`.
+function Theme.mix(a: Color3, b: Color3, t: number): Color3
+	return a:Lerp(b, t)
+end
+
+-- True when the current Studio theme has a dark background.
+function Theme.isDark(): boolean
+	local bg = Theme.background()
+	return (0.299 * bg.R + 0.587 * bg.G + 0.114 * bg.B) < 0.5
+end
+
+-- Raised surface (cards, composer field): a few percent toward the text colour.
+function Theme.raised(): Color3
+	return Theme.mix(Theme.background(), Theme.text(), if Theme.isDark() then 0.06 else 0.035)
+end
+
+-- Subtle fill for chips, hover rows and the thinking block.
+function Theme.subtle(): Color3
+	return Theme.mix(Theme.background(), Theme.text(), if Theme.isDark() then 0.11 else 0.07)
+end
+
+-- Hairline separators: softer than Studio's Border colour.
+function Theme.hairline(): Color3
+	return Theme.mix(Theme.background(), Theme.text(), if Theme.isDark() then 0.16 else 0.13)
+end
+
+-- User bubble: the accent colour washed into the background, so MainText stays readable.
 function Theme.userBubble(): Color3
-	return Theme.color(Enum.StudioStyleGuideColor.Item, Enum.StudioStyleGuideModifier.Selected)
+	return Theme.mix(Theme.background(), Theme.accent(), if Theme.isDark() then 0.32 else 0.16)
 end
 
 function Theme.assistantBubble(): Color3
-	return Theme.color(Enum.StudioStyleGuideColor.Item)
+	return Theme.raised()
 end
 
+-- Code panels are always dark (editor-like) in both themes, with fixed light text.
 function Theme.codeBackground(): Color3
-	return Theme.color(Enum.StudioStyleGuideColor.ScriptBackground)
+	return if Theme.isDark() then Color3.fromRGB(24, 24, 27) else Color3.fromRGB(32, 33, 36)
+end
+
+function Theme.codeHeader(): Color3
+	return if Theme.isDark() then Color3.fromRGB(36, 36, 40) else Color3.fromRGB(45, 46, 50)
 end
 
 function Theme.codeText(): Color3
-	return Theme.color(Enum.StudioStyleGuideColor.ScriptText)
+	return Color3.fromRGB(220, 220, 220)
+end
+
+function Theme.codeDimText(): Color3
+	return Color3.fromRGB(150, 150, 155)
+end
+
+-- Colour of `inline code` inside prose (RichText hex), readable on light and dark.
+function Theme.inlineCodeHex(): string
+	return if Theme.isDark() then "#E5A86E" else "#B0461C"
 end
 
 function Theme.error(): Color3
@@ -94,14 +135,37 @@ function Theme.warning(): Color3
 end
 
 function Theme.success(): Color3
-	-- Studio has no "success" guide color; ScriptBuiltInFunction is green-ish in both
-	-- default themes, but a fixed mid green reads well on light and dark backgrounds.
+	-- Studio has no "success" guide colour; a fixed mid green reads well on light and dark.
 	return Color3.fromRGB(46, 160, 67)
 end
 
 function Theme.danger(): Color3
 	return Color3.fromRGB(200, 40, 40)
 end
+
+function Theme.onAccent(): Color3
+	return Color3.new(1, 1, 1)
+end
+
+---------------------------------------------------------------------------
+-- Fonts. BuilderSans is Studio's own UI face; older Studio builds without it fall
+-- back to SourceSans. RobotoMono is used for code.
+---------------------------------------------------------------------------
+
+local function pickFont(name: string, fallback: Enum.Font): Enum.Font
+	local ok, font = pcall(function()
+		return (Enum.Font :: any)[name]
+	end)
+	if ok and typeof(font) == "EnumItem" then
+		return font :: any
+	end
+	return fallback
+end
+
+Theme.FONT_REGULAR = pickFont("BuilderSans", Enum.Font.SourceSans)
+Theme.FONT_MEDIUM = pickFont("BuilderSansMedium", Enum.Font.SourceSansSemibold)
+Theme.FONT_BOLD = pickFont("BuilderSansBold", Enum.Font.SourceSansBold)
+Theme.FONT_MONO = Enum.Font.RobotoMono
 
 -- Register a callback that re-applies colors. It runs immediately and on every
 -- Studio ThemeChanged. Returns a function that unregisters the callback (call it
