@@ -1,0 +1,11 @@
+.git
+deliverables
+experiments
+tests
+plugin
+benchmarks
+**/__pycache__
+runs/*
+!runs/sft-scripts/
+runs/sft-scripts/*
+!runs/sft-scripts/best.pt

@@ -240,3 +240,21 @@ def test_plausibility_filter_rejects_token_soup():
     assert plausibility_problems("x x x x x x x x x x x x x x x x x x x x = 1 local") != []
     assert plausibility_problems("local function sum(t)\n\tlocal s = 0\n\tfor _, v in ipairs(t) do\n\t\ts += v\n"
                                  "\tend\n\treturn s\nend") == []
+
+
+def test_public_bind_requires_token(monkeypatch):
+    from godmode.server import app
+
+    class Fake:
+        server_address = ("0.0.0.0", 1)
+
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(app, "make_server", lambda *a, **k: Fake())
+    monkeypatch.delenv("GODMODE_TOKEN", raising=False)
+    assert app.main(["--host", "0.0.0.0", "--ckpt", "x.pt"]) == 2
+    assert app.main(["--host", "0.0.0.0", "--ckpt", "x.pt", "--token", "T"]) == 0

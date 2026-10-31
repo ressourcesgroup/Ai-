@@ -209,3 +209,23 @@ def test_held_out_families_are_excluded_from_training_generation():
     train_families = [f for f in FAMILIES if f not in HELD_OUT_FAMILIES]
     samples, _ = generate(2, seed=1, families=train_families)
     assert not {s.family for s in samples} & set(HELD_OUT_FAMILIES)
+
+
+# ---------------------------------------------------------------- script eval scoring
+
+
+def test_script_eval_scoring():
+    from godmode.eval.script_eval import eval_prompts, score, summarize
+
+    ref = '-- Script in ServerScriptService: x\nlocal P = game:GetService("Players")\nlocal R = game:GetService("RunService")\n'
+    good = '-- Script in ServerScriptService: y\nlocal P = game:GetService("Players")\nprint(P)\n'
+    assert score(good, ref) == {"verified": True, "placed": True, "class_ok": True, "service_recall": 0.5, "complete": True}
+    wrong = '-- LocalScript in StarterGui: y\nprint(1)\n'
+    s = score(wrong, ref)
+    assert s["placed"] and not s["class_ok"] and not s["complete"]
+    assert score(None, ref)["verified"] is False
+    ps = eval_prompts(1, 2, seed=5)
+    assert {p["split"] for p in ps} == {"seen", "held_out"}
+    assert {p["family"] for p in ps if p["split"] == "held_out"} == set(HELD_OUT_FAMILIES)
+    rows = [{**score(good, ref), "split": "seen", "seconds": 1.0}, {**score(None, ref), "split": "seen", "seconds": 3.0}]
+    assert summarize(rows)["seen"]["complete"] == 0.5 and summarize(rows)["seen"]["mean_seconds"] == 2.0

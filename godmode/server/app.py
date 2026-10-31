@@ -2,7 +2,7 @@
 
     python -m godmode.server --port 8765 [--ckpt PATH] [--token T] [--best-of N] [--prompt-style comment|chat]
 
-Binds 127.0.0.1 by default. If a token is configured every request must send
+Binds 127.0.0.1 by default (env GODMODE_HOST, PORT); non-local binds require a token. If a token is configured every request must send
 `X-Godmode-Token`. Request bodies are limited to 1 MiB.
 """
 
@@ -169,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="auto = chat format for instruction-tuned (SFT) checkpoints, comment format otherwise")
     ap.add_argument("--corpus", action="append", default=None,
                     help="corpus directory for retrieval (repeatable; default seed + external corpus)")
+    ap.add_argument("--allow-no-token", action="store_true", help="allow a non-local bind without a token (unsafe)")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args(argv)
 
@@ -177,6 +178,11 @@ def main(argv: list[str] | None = None) -> int:
     retriever = Retriever(args.corpus) if args.corpus else Retriever()
     httpd = make_server(args.host, args.port, GodmodeService(model, retriever), args.token, args.verbose)
     if args.host not in ("127.0.0.1", "localhost", "::1"):
+        if not args.token and not args.allow_no_token:
+            httpd.server_close()
+            print(f"refusing to bind {args.host} without a token: set GODMODE_TOKEN (or --token), "
+                  "or pass --allow-no-token if you really want an open server", file=sys.stderr)
+            return 2
         print(f"WARNING: binding to {args.host} exposes the server beyond this machine", file=sys.stderr)
     print(f"GODMODE server on http://{args.host}:{httpd.server_address[1]} "
           f"(model: {model.tag}; token: {'on' if args.token else 'off'})", flush=True)

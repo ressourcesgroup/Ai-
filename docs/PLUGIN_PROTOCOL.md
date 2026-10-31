@@ -75,6 +75,8 @@ Request:
 * `context` optional. `selection` paths and `openScript` are used by some tools
   (delete selected, review/fix open script).
 * `autonomy` integer 1-5, default 2.
+* `thinking` optional: `low` | `medium` (default) | `high` | `xhigh` | `max` (labels such as
+  `"Extra high"` are accepted). Unknown values answer `400 bad_request`. See *Thinking levels* below.
 
 Response:
 
@@ -267,8 +269,11 @@ would bump it and the plugin should refuse servers with a newer major version.
    from `--ckpt` / `GODMODE_CKPT`, prompt style `comment` (default: the request as `-- ` comment
    lines, matching the training documents) or `chat` (`<|user|>...\n<|assistant|>`).
    Candidates must pass structure + lint + a plausibility filter; otherwise the reply says the
-   model could not produce verified code. Accepted model code is proposed only as an inert
-   `ModuleScript` draft in `ServerStorage`. Model requests on CPU can take tens of seconds;
+   model could not produce verified code. The prompt style defaults to `auto`: `chat` for an
+   instruction-tuned (SFT) checkpoint, `comment` otherwise. If the code starts with a placement
+   header (`-- Script in ServerScriptService: ...`) for a sensible class/container pair, it is
+   proposed there; otherwise as an inert `ModuleScript` draft in `ServerStorage`. Model code
+   always has `requires_approval: true`. Model requests on CPU can take tens of seconds;
    the plugin should use a generous HTTP timeout and show a "thinking" state.
 
 ## Animation styles
@@ -312,3 +317,28 @@ anatomical data. Each animation is accompanied by a verified LocalScript
 `Animator`, toggles it with **G**, and destroys the track / unbinds input on death or removal.
 In Studio it can play the unpublished KeyframeSequence via
 `KeyframeSequenceProvider:RegisterKeyframeSequence`; live games need the published asset id.
+
+## Thinking levels (added in v1, optional)
+
+`GET /health` adds `thinking_levels: [{"id", "label", "description"}]`. `/chat` replies add:
+
+```json
+"thinking": {"level": "high", "summary": "...", "elapsed_ms": 18234,
+             "steps": [{"label": "Sample candidates", "detail": "8 candidate(s) ...", "ms": 17000}]}
+```
+
+Steps are only those that actually ran, with measured wall time. A level buys real compute,
+not hidden chain-of-thought:
+
+| id | samples | max new tokens | re-rank by likelihood | retrieval k |
+|----|---------|----------------|-----------------------|-------------|
+| low | 1 | 384 | no | 1 |
+| medium | 4 | 512 | no | 3 |
+| high | 8 | 640 | yes | 4 |
+| xhigh | 16 | 704 | yes | 5 |
+| max | 32 | 736 | yes | 6 |
+
+## Hosting (added in v1)
+
+The server reads `GODMODE_HOST`, `PORT`, `GODMODE_TOKEN` and `GODMODE_CKPT`. It refuses to bind a
+non-local address without a token unless started with `--allow-no-token`. See `docs/ONLINE_MODE.md`.

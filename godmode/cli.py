@@ -193,6 +193,16 @@ def cmd_grib(args) -> None:
     print(json.dumps(report, indent=2))
 
 
+def cmd_eval_scripts(args) -> None:
+    from .eval import script_eval
+
+    argv = ["--ckpt", args.ckpt, "--level", args.level, "--per-family", str(args.per_family),
+            "--held-per-family", str(args.held_per_family), "--out", args.out]
+    if args.limit:
+        argv += ["--limit", str(args.limit)]
+    script_eval.main(argv)
+
+
 def cmd_experiment(args) -> None:
     """Controlled architecture comparison: same data, steps, seeds; multiple seeds per arm."""
     from .research import ExperimentRecord, Registry, promotion_gate
@@ -303,6 +313,15 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--train-texts", default=None, help="train_texts.json from build-data, for contamination checks")
     r.add_argument("--out", default=None)
     r.set_defaults(fn=cmd_grib)
+
+    es = sub.add_parser("eval-scripts", help="measure complete, correctly placed scripts on fresh + held-out prompts")
+    es.add_argument("--ckpt", required=True)
+    es.add_argument("--level", default="low", help="thinking level: low|medium|high|xhigh|max")
+    es.add_argument("--per-family", type=int, default=1)
+    es.add_argument("--held-per-family", type=int, default=3)
+    es.add_argument("--limit", type=int, default=None)
+    es.add_argument("--out", required=True)
+    es.set_defaults(fn=cmd_eval_scripts)
 
     e = sub.add_parser("experiment", help="multi-seed controlled comparison of model configs")
     e.add_argument("--name", required=True)
