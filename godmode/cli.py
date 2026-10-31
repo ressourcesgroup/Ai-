@@ -128,6 +128,26 @@ def cmd_generate(args) -> None:
     print(tok.decode(out[0].tolist()))
 
 
+def _system_adapter(ckpt: str | None):
+    """The whole GODMODE system as the plugin sees it (router + tools + retrieval + model).
+
+    Scores the Luau of every proposed script action. This measures the product,
+    not the neural model; report it separately from `ckpt:` scores.
+    """
+    from .server.model_backend import ModelBackend
+    from .server.service import GodmodeService
+
+    service = GodmodeService(model=ModelBackend(ckpt) if ckpt else None)
+
+    def answer(prompt: str) -> str:
+        reply = service.chat({"message": prompt, "autonomy": 3})
+        sources = [a.get("source") or a.get("new_source") or "" for a in reply.get("actions", [])
+                   if a.get("type") in ("create_script", "edit_script")]
+        return "\n".join(f"```lua\n{src}\n```" for src in sources)
+
+    return answer
+
+
 def cmd_grib(args) -> None:
     from .eval import grib
 
@@ -138,6 +158,8 @@ def cmd_grib(args) -> None:
         adapter = grib.reference_adapter(tasks)
     elif args.adapter == "empty":
         adapter = grib.empty_adapter
+    elif args.adapter == "system" or args.adapter.startswith("system:"):
+        adapter = _system_adapter(args.adapter[7:] or None)
     elif args.adapter.startswith("ckpt:"):
         adapter = grib.checkpoint_adapter(args.adapter[5:])
     else:
@@ -241,7 +263,7 @@ def main(argv: list[str] | None = None) -> None:
     g.set_defaults(fn=cmd_generate)
 
     r = sub.add_parser("grib", help="run the GRIB benchmark")
-    r.add_argument("--adapter", default="reference", help="reference | empty | ckpt:<path>")
+    r.add_argument("--adapter", default="reference", help="reference | empty | ckpt:<path> | system[:<ckpt>]")
     r.add_argument("--tasks", default=GRIB_TASKS)
     r.add_argument("--train-texts", default=None, help="train_texts.json from build-data, for contamination checks")
     r.add_argument("--out", default=None)

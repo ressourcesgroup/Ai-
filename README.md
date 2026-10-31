@@ -1,50 +1,80 @@
 # PROJECT GODMODE
 
-An independent, from-scratch foundation-model research stack for Roblox and Luau development. It has its own tokenizer, architecture, weights, data pipeline, verifiers and benchmark. It is not a wrapper around any external model.
+An independent, from-scratch AI system for Roblox development. It has its own tokenizer, model, weights, data pipeline, verifiers, benchmark, and a **Roblox Studio plugin** you can chat with. It is not a wrapper around any external AI.
 
-> **Honest status (milestone M1):** the full pipeline (data → tokenizer → model → training → benchmark → experiment registry) runs end to end and is covered by 76 tests. The trained model is **nano scale (~2M parameters, ~51K training tokens, CPU-trained)** and scores **0%** on our benchmark, GRIB v0. That is a real baseline, not a capable assistant. See [docs/STATUS.md](docs/STATUS.md) for exactly what is implemented, experimental, planned or theoretical.
+> **Honest status:** the whole system works end to end and has 460+ passing tests.
+>
+> - **The plugin is reliable for the things its tools cover:** building obbies, houses and arenas, writing validated remotes and data saving, and creating 15 animation styles.
+> - **For questions, it shows cited examples from real Roblox code.**
+> - **Our own neural model is small** (12.6M parameters, trained on CPU on Roblox's licensed Luau corpus). It writes Roblox-flavored code that is usually **not correct yet**. The plugin only shows model code that passes our checks, and labels it.
+>
+> Making the model genuinely good needs GPU training at larger scale. See [docs/TRAINING_CLOUD.md](docs/TRAINING_CLOUD.md). [docs/STATUS.md](docs/STATUS.md) lists exactly what is tested, experimental or planned.
 
-## What's here
+## Use the Studio plugin
+
+1. **Install Python 3.10+**, then, in this folder:
+   ```bash
+   pip install torch numpy
+   pip install -e .
+   ```
+2. **Start the GODMODE server** (leave it running):
+   ```bash
+   python -m godmode.server                                   # tools + search only
+   python -m godmode.server --ckpt runs/small-full2/best.pt   # also enable our trained model
+   ```
+3. **Install the plugin.** Copy `plugin/dist/GodmodePlugin.rbxmx` into your Roblox Plugins folder:
+   - Windows: `%LOCALAPPDATA%\Roblox\Plugins`
+   - macOS: `~/Documents/Roblox/Plugins`
+
+   Or open Studio > Plugins tab > *Plugins Folder*. Restart Studio.
+4. **Open it.** Click **GODMODE** in the Plugins toolbar. When Studio asks whether the plugin may make HTTP requests to `localhost`, allow it.
+5. **Ask it things.** For example:
+   - "build an obby with 10 blue platforms"
+   - "make a sprint animation", "make a punch combo animation", "make an aw shucks emote"
+   - "create a validated remote event for buying items"
+   - "save player data with datastores"
+   - "how do I use TweenService?"
+
+Every change is shown as a **preview card first**. Nothing happens until you click **Apply**, each change is a single **Ctrl+Z** undo step, and deletes need a second confirmation. The *autonomy level* (1 Assistant … 5 Research) controls whether it only answers (level 1) or also proposes changes. Every reply says where it came from: `tool:…`, `retrieval`, or `model:…`.
+
+See [plugin/README.md](plugin/README.md) for details. **The plugin has been structurally verified but never run inside Roblox Studio** (impossible in our build environment), so please report anything that breaks.
+
+## Animations
+
+There are 15 procedural R15 styles: idle, walk, **run (chase/"Fugitive" style)**, jump, **punch combo**, **kick**, block, **hit reaction**, **knockdown (elimination style)**, victory, wave, **"aw shucks"**, dance, sit, crouch. They are created as `KeyframeSequence`s that you can open and refine in the Animation Editor. They were designed from the titles of the reference videos, not from the videos themselves (we can't watch video) and not from motion capture.
+
+## What's inside
 
 | Path | What |
 |---|---|
-| `godmode/tokenizer` | Byte-level BPE trained from scratch, code-aware pre-tokenization |
-| `godmode/model` | Decoder-only transformer: RMSNorm, RoPE, GQA, SwiGLU, KV cache, sparse MoE, recurrent depth |
-| `godmode/data` | License-gated ingestion, quality filter, exact + MinHash dedup, verifier-gated synthetic data |
-| `godmode/luau` | Luau lexer, structural checker, Roblox security lint (GM001–GM007) |
-| `godmode/train` | Pretraining loop, cosine LR, checkpoints with tokenizer integrity checks |
-| `godmode/eval` | GRIB benchmark harness, contamination control, model adapters |
-| `godmode/research` | Append-only experiment registry, evidence-based promotion gate |
-| `data/seed_corpus` | Original MIT-licensed Luau (16 files) |
-| `benchmarks/grib` | GRIB v0 tasks with reference solutions |
-| `configs/` | Model configs: nano dense / MoE / recurrent |
-| `experiments/` | Registry and write-ups of controlled experiments |
-| `docs/` | [Architecture](docs/ARCHITECTURE.md) · [Diagrams](docs/DIAGRAMS.md) · [Roadmap](docs/ROADMAP.md) · [Status](docs/STATUS.md) · [Backlog](docs/BACKLOG.md) |
+| `plugin/` | Roblox Studio plugin (Luau) + `build_rbxmx.py` packager |
+| `godmode/server` | Local HTTP server the plugin talks to: router, tools, search, model fallback |
+| `godmode/tools` | Verified generators: builders, remotes, leaderstats, DataStores, UI, NPCs, doors |
+| `godmode/anim` | Procedural R15 animation engine |
+| `godmode/model`, `godmode/tokenizer` | Our transformer (GQA, RoPE, SwiGLU, MoE, recurrent depth) and BPE tokenizer, written from scratch |
+| `godmode/train` | Training: single GPU/CPU, multi-GPU (DDP), bf16, grad accumulation, continue-from-checkpoint |
+| `godmode/data` | License-gated ingestion, dedup (MinHash + LSH), leakage-free clustered splits, synthetic data |
+| `godmode/luau` | Luau lexer, structure checker, Roblox security lint |
+| `godmode/eval`, `benchmarks/grib` | GRIB benchmark (21 tasks) with contamination control |
+| `godmode/research` | Experiment registry + statistical promotion gate |
+| `docs/` | [Architecture](docs/ARCHITECTURE.md) · [Status](docs/STATUS.md) · [Model card](docs/MODEL_CARD.md) · [Plugin protocol](docs/PLUGIN_PROTOCOL.md) · [Cloud training](docs/TRAINING_CLOUD.md) · [Roadmap](docs/ROADMAP.md) · [Backlog](docs/BACKLOG.md) |
 
-## Quickstart
+## Train it yourself
 
 ```bash
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -e ".[dev]"
-pytest -q                                   # 76 tests
-
-python -m godmode build-data                # corpus + synthetic -> filtered, deduped, tokenized (runs/data)
-python -m godmode train --steps 400         # ~75 s on 4 CPU cores
-python -m godmode generate --ckpt runs/nano-dense/best.pt \
-    --prompt $'<|user|>Create leaderstats with IntValues: Gems, Wins.\n<|assistant|>' --temperature 0
-python -m godmode grib --adapter ckpt:runs/nano-dense/best.pt --train-texts runs/data/train_texts.json
-python -m godmode experiment --name my-exp --hypothesis "..." \
-    --configs configs/nano-dense.json configs/nano-moe.json --seeds 0 1 2
+python -m godmode fetch-data roblox-luau-corpus     # Roblox's MIT-licensed Luau dataset
+python -m godmode build-data --vocab-size 8192 --out runs/data-full
+python -m godmode train --data runs/data-full --config configs/small-cpu.json --steps 3000 --out runs/small
+python -m godmode grib --adapter ckpt:runs/small/best.pt   # model alone
+python -m godmode grib --adapter system                    # whole plugin pipeline
+pytest -q
 ```
 
-## Principles
+## Data and licenses
 
-1. Evidence over assertion: nothing is claimed without a reproducible test or benchmark.
-2. Every architecture idea is an experiment against a baseline, with multiple seeds.
-3. Verifiers (checkers, linters, test runners) are the core asset. They filter data, grade benchmarks and will supply RL rewards.
-4. Only legally usable, provenance-tracked data.
-5. Generated code must be server-authoritative and secure. GODMODE does not produce exploits.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+- Our code: MIT.
+- Training data:
+  - Our own seed corpus (MIT).
+  - [Roblox/luau_corpus](https://huggingface.co/datasets/Roblox/luau_corpus) (MIT, © Roblox Corporation; built from experiences whose creators opted in).
+  - Verified synthetic examples.
+- Every document's source and license is recorded in the build manifest.
