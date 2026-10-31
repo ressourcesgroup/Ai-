@@ -6,3 +6,4 @@ runs/
 *.pt
 !experiments/**/*.json
 data/external/*/*.jsonl
+deliverables/
