@@ -109,6 +109,12 @@ Offline mode makes no HTTP requests, so no prompt appears.
   `KeyframeSequence` (default `ServerStorage.GodmodeAnimations` if the action names no
   parent), selects it, and reports a local preview id from
   `AnimationClipProvider:RegisterKeyframeSequence` (session-local, not an uploaded asset).
+* *"make a main menu with play, settings and quit buttons"* (also *"fais une boutique"*,
+  *"haz un inventario con 30 casillas"*) - one `create_instances` card that builds a real
+  `ScreenGui` in `StarterGui` (frames, buttons, UICorner/UIStroke, scale layout). **No
+  scripts are created**; each button carries a `GodmodeAction` attribute you can wire
+  later. Offline mode always gives the default main menu; the server builds the GUI you
+  describe. Ask for a "working hud script" if you want the scripted HUD instead.
 * *"create a validated remote event for buying items"* - script cards with a source
   preview and the server's structure/lint verification; **Re-verify** calls `/verify`.
 * *"what does task.defer do?"* - a text answer only. Every reply shows its `source`

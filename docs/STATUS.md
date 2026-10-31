@@ -34,8 +34,11 @@ Single source of truth for what exists. Updated every milestone.
 | Research | Automated weakness → hypothesis loop | Planned | — |
 | Product | Local inference server + Studio plugin, thinking levels low…max | Implemented | `tests/test_server.py`, `plugin/` |
 | Product | Online mode (Docker image, token-required public bind) | Implemented — image built and `/health` checked in the sandbox; **not deployed anywhere by us** | `Dockerfile`, `docs/ONLINE_MODE.md` |
+| Product | GUI designer: builds real ScreenGui instance trees (menu, shop, inventory, settings, dialog, loading, timer, notification, HUD) from EN/FR/ES requests, no scripts | Implemented — **deterministic designer, not neural output; buttons are tagged (`GodmodeAction` attribute) but not wired** | `godmode/tools/gui.py`, `tests/test_gui.py` |
+| Product | Multilingual requests (English, French, Spanish routing + FR/ES training prompts) | Implemented for EN/FR/ES only; other languages untested | `tests/test_multilingual.py` |
+| Product | Model-first script intents (model writes the script, verified; tool fallback; `engine:"tool"` override) | Implemented | `tests/test_multilingual.py` |
 | Product | Project memory, agents, IDE | Planned | — |
-| Generative | GODMODE-3D/TEXTURE/ANIMATE/WORLD/AUDIO/UI/SPATIAL/OPTIMIZE | Theoretical | — |
+| Generative | GODMODE-3D/TEXTURE/ANIMATE/WORLD/AUDIO/SPATIAL/OPTIMIZE (neural) | Theoretical | — |
 
 ## Measured results (milestone M1)
 
