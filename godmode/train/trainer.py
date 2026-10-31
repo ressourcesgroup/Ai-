@@ -40,6 +40,7 @@ class TrainConfig:
     device: str = "auto"  # auto -> cuda if available else cpu
     precision: str = "auto"  # auto -> bf16 on cuda with bf16 support, else fp32
     grad_accum: int = 1
+    init_from: str = ""  # checkpoint to continue from (same model config and tokenizer required)
     out_dir: str = "runs/default"
 
 
@@ -146,6 +147,13 @@ def train(model_cfg: ModelConfig, cfg: TrainConfig, tok: BPETokenizer, train_tok
     if main:
         out.mkdir(parents=True, exist_ok=True)
     raw = GodmodeLM(model_cfg).to(device)
+    if cfg.init_from:
+        init = torch.load(cfg.init_from, map_location=device, weights_only=False)
+        if init["model_config"] != model_cfg.to_dict():
+            raise ValueError("init_from checkpoint has a different model config")
+        if init["tokenizer_fingerprint"] != tok.fingerprint():
+            raise ValueError("init_from checkpoint was trained with a different tokenizer")
+        raw.load_state_dict(init["state_dict"])
     model = raw
     if distributed:
         # Experts that receive no tokens in a step have no gradient.

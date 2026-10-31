@@ -62,7 +62,10 @@ def cmd_build_data(args) -> None:
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    tok = BPETokenizer.train([d.text for d in train_docs], vocab_size=args.vocab_size)
+    if args.tokenizer:
+        tok = BPETokenizer.load(args.tokenizer)  # reuse a vocabulary so existing checkpoints stay compatible
+    else:
+        tok = BPETokenizer.train([d.text for d in train_docs], vocab_size=args.vocab_size)
     tok.save(out / "tokenizer.json")
     train_ids, val_ids, test_ids = pack(train_docs, tok), pack(val_docs, tok), pack(test_docs, tok)
     np.save(out / "train.npy", train_ids)
@@ -105,7 +108,7 @@ def cmd_train(args) -> None:
     mcfg = _model_config(args.config, tok)
     tcfg = TrainConfig(steps=args.steps, batch_size=args.batch_size, seq_len=args.seq_len, lr=args.lr,
                        seed=args.seed, out_dir=args.out, eval_every=args.eval_every, device=args.device,
-                       precision=args.precision, grad_accum=args.grad_accum)
+                       precision=args.precision, grad_accum=args.grad_accum, init_from=args.init_from)
     result = train(mcfg, tcfg, tok, tr, va, test_tokens=te)
     result.pop("history", None)
     if "rank" not in result:
@@ -206,6 +209,7 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--vocab-size", type=int, default=2048)
     b.add_argument("--val-fraction", type=float, default=0.1)
     b.add_argument("--test-fraction", type=float, default=0.1)
+    b.add_argument("--tokenizer", default=None, help="reuse an existing tokenizer.json instead of training one")
     b.add_argument("--cluster-threshold", type=float, default=0.5, help="MinHash Jaccard above which documents share a split")
     b.add_argument("--seed", type=int, default=0)
     b.add_argument("--out", default="runs/data")
@@ -223,6 +227,7 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--device", default="auto", help="auto | cpu | cuda | cuda:N")
     t.add_argument("--precision", default="auto", help="auto | bf16 | fp32")
     t.add_argument("--grad-accum", type=int, default=1)
+    t.add_argument("--init-from", default="", help="continue from this checkpoint's weights")
     t.add_argument("--out", default="runs/nano-dense")
     t.set_defaults(fn=cmd_train)
 

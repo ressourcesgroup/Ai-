@@ -90,3 +90,22 @@ def test_distributed_data_parallel_two_processes(tmp_path):
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert '"world_size": 2' in proc.stdout
     assert (tmp_path / "run" / "best.pt").exists()
+
+
+def test_init_from_continues_training_and_rejects_mismatches(tmp_path):
+    import pytest
+
+    text = "local x = game:GetService(\"Players\")\nprint(x)\n" * 50
+    tok = BPETokenizer.train([text], vocab_size=300)
+    ids = np.array(tok.encode(text) * 4, dtype=np.uint16)
+    mcfg = ModelConfig(vocab_size=tok.vocab_size, d_model=32, n_layers=2, n_heads=4, n_kv_heads=2, max_seq_len=64)
+    base = dict(batch_size=4, seq_len=32, warmup=2, eval_every=5, eval_batches=2, device="cpu")
+    first = train(mcfg, TrainConfig(steps=20, out_dir=str(tmp_path / "a"), **base), tok, ids, ids, log=lambda *_: None)
+    cont = train(mcfg, TrainConfig(steps=5, init_from=str(tmp_path / "a" / "best.pt"), out_dir=str(tmp_path / "b"), **base),
+                 tok, ids, ids, log=lambda *_: None)
+    assert cont["history"][0]["val_loss"] < first["history"][0]["val_loss"]  # starts from trained weights
+    other = BPETokenizer.train([text + "zzz"], vocab_size=301)
+    with pytest.raises(ValueError):
+        train(ModelConfig(vocab_size=other.vocab_size, d_model=32, n_layers=2, n_heads=4, n_kv_heads=2, max_seq_len=64),
+              TrainConfig(steps=1, init_from=str(tmp_path / "a" / "best.pt"), out_dir=str(tmp_path / "c"), **base),
+              other, ids, ids, log=lambda *_: None)
