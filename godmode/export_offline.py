@@ -56,6 +56,33 @@ ANIM_SYNONYMS = {
 }
 
 
+def _luau_quote(text: str) -> str:
+    """A double-quoted Luau string literal for `text`.
+
+    Not json.dumps: JSON writes non-ASCII as `\\u00e9`, which is a *malformed escape*
+    in Luau (it requires `\\u{e9}`), so a single accented keyword made the whole
+    generated module fail to compile. Non-ASCII text is kept as raw UTF-8, which
+    Luau string literals accept; only the characters that need it are escaped.
+    """
+    out = []
+    for ch in text:
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == '"':
+            out.append('\\"')
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append(f"\\{ord(ch):03d}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
+
 def _long_string(text: str) -> str:
     level = 0
     while f"]{'=' * level}]" in text:
@@ -97,9 +124,9 @@ def render(entries: list[dict]) -> str:
         "local entries: { Entry } = {",
     ]
     for e in entries:
-        kw = ", ".join(json.dumps(k) for k in e["keywords"])
+        kw = ", ".join(_luau_quote(k) for k in e["keywords"])
         lines.append("\t{")
-        lines.append(f"\t\tkey = {json.dumps(e['key'])},")
+        lines.append(f"\t\tkey = {_luau_quote(e['key'])},")
         lines.append(f"\t\tkeywords = {{ {kw} }},")
         lines.append(f"\t\tanimation = {'true' if e['animation'] else 'false'},")
         lines.append(f"\t\tjson = {_long_string(json.dumps(e['response'], separators=(',', ':')))},")

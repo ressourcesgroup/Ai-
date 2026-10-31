@@ -4,8 +4,10 @@ import json
 import re
 from pathlib import Path
 
-from godmode.export_offline import build_entries, render
-from godmode.luau import check_structure, lint
+import pytest
+
+from godmode.export_offline import _luau_quote, build_entries, render
+from godmode.luau import check_structure, lint, tokenize
 
 PLUGIN = Path(__file__).resolve().parent.parent / "plugin" / "src"
 ENTRIES = build_entries()
@@ -85,3 +87,26 @@ def test_plugin_sources_parse_and_offline_is_default():
     assert "readSetting(SETTING_USE_SERVER) == true" in main
     assert "OfflineEngine.chat(payload)" in main
     assert re.search(r"if not useServer then\s+return true, \"Offline mode", main)
+
+
+@pytest.mark.parametrize("text", ["plain", 'say "hi"', "back\\slash", "two\nlines\r\t", "bell\x07 del\x7f", "écran de chargement", "plataforma móvil", "ñ ü ç 日本"])
+def test_luau_quote_produces_valid_luau_literals(text):
+    lit = _luau_quote(text)
+    toks = tokenize(f"local s = {lit}")
+    assert [t.kind for t in toks].count("string") == 1
+    assert "\\u" not in lit  # never a JSON-style \u escape
+    if text.isprintable():
+        assert lit == '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def test_json_style_escapes_would_break_the_module():
+    """Regression for the shipped bug: json.dumps("écran") is a malformed Luau escape."""
+    assert not check_structure(f"local k = {json.dumps('écran')}\n").ok
+    src = render(ENTRIES)
+    kw_lines = [ln for ln in src.splitlines() if ln.lstrip().startswith(("key =", "keywords ="))]
+    assert len(kw_lines) == 2 * len(ENTRIES)
+    assert not any("\\u" in ln for ln in kw_lines)
+    assert any("é" in ln for ln in kw_lines)  # accents are raw UTF-8
+    for e in ENTRIES:
+        for k in e["keywords"]:
+            assert _luau_quote(k) in src

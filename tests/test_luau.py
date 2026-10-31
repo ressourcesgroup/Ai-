@@ -209,3 +209,36 @@ def test_gm001_global_loadstring_and_environment_indexing():
 def test_lexer_line_numbers_after_multiline_strings():
     toks = tokenize('local s = "a\\z\n  b"\nlocal t = [[\n]]\nx')
     assert toks[-2].value == "x" and toks[-2].line == 5
+
+
+# String escapes, mirroring Luau's Lexer::fixupQuotedString (Ast/src/Lexer.cpp).
+# Regression: JSON-style "\u00e1" in the generated OfflineData.luau is a malformed
+# escape in Luau, which made that module (and so the whole plugin) fail to load.
+@pytest.mark.parametrize(
+    "literal",
+    [r'"\u00e1"', r'"\u{}"', r'"\u{110000}"', r'"\u{e1"', r'"\x4"', r'"\xZZ"', r'"\256"', r'"\999"', '"a\\\0b"'],
+)
+def test_lexer_rejects_malformed_escapes(literal):
+    with pytest.raises(LuauSyntaxError, match="malformed escape"):
+        tokenize(f"local s = {literal}")
+    assert not check_structure(f"local s = {literal}\n").ok
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        r'"\u{e1}"', r'"\u{10FFFF}"', r'"\x41\x7e"', r'"\255\0\65"', r'"\a\b\f\n\r\t\v\\\"\'"',
+        r'"a\z   b"', '"a\\\nb"', '"a\\\r\nb"',
+        # Luau keeps unknown escapes as the character itself (unescape() default branch),
+        # e.g. a Windows path in the external training corpus: "C:\RC7\rc7.dat".
+        r'"\q"', r'"C:\RC7\rc7.dat"', r'"\{"', r'"\`"', r"'é ñ ü'",
+    ],
+)
+def test_lexer_accepts_valid_escapes(literal):
+    assert [t.kind for t in tokenize(f"local s = {literal}")].count("string") == 1
+
+
+def test_interpolated_string_escapes():
+    assert check_structure("local s = `a \\{b\\} \\` {c}`\n").ok
+    with pytest.raises(LuauSyntaxError, match="malformed escape"):
+        tokenize("local s = `\\u00e1 {c}`")

@@ -51,9 +51,46 @@ def _long_bracket_level(src: str, i: int) -> int:
     return -1
 
 
-def _scan_escape(src: str, i: int, line: int) -> tuple[int, int]:
-    """src[i] is a backslash inside a string; return the index after the escape."""
+_SIMPLE_ESCAPES = set("abfnrtv\\\"'")
+_HEX = set("0123456789abcdefABCDEF")
+_DIGITS = set("0123456789")
+
+
+def _scan_escape(src: str, i: int, line: int, interpolated: bool = False) -> tuple[int, int]:
+    """src[i] is a backslash inside a string; return the index after the escape.
+
+    Mirrors Luau's ``Lexer::fixupQuotedString``: a malformed escape is a syntax
+    error ("String literal contains malformed escape sequence"). Only these can be
+    malformed: ``\\x`` without exactly two hex digits, ``\\u`` not of the form
+    ``\\u{1-16 hex digits}`` at most 0x10FFFF (so JSON's ``\\u00e9`` is an error),
+    a decimal escape above 255, and a backslash followed by a NUL byte. Any other
+    character after a backslash (``\\q``, ``\\R``, ``\\{``) is accepted by Luau and
+    stands for itself, so it is accepted here too.
+    """
     nxt = src[i + 1] if i + 1 < len(src) else ""
+    if nxt in _SIMPLE_ESCAPES or (interpolated and nxt in "{`"):
+        return i + 2, line
+    if nxt == "x":
+        digits = src[i + 2:i + 4]
+        if len(digits) == 2 and all(c in _HEX for c in digits):
+            return i + 4, line
+        raise LuauSyntaxError("malformed escape sequence '\\x' (needs exactly two hex digits)", line)
+    if nxt in _DIGITS:
+        j = i + 1
+        while j < len(src) and j < i + 4 and src[j] in _DIGITS:
+            j += 1
+        if int(src[i + 1:j]) > 255:
+            raise LuauSyntaxError(f"malformed escape sequence '\\{src[i + 1:j]}' (decimal escape above 255)", line)
+        return j, line
+    if nxt == "u":
+        j = i + 2
+        if j < len(src) and src[j] == "{":
+            k = j + 1
+            while k < len(src) and src[k] in _HEX:
+                k += 1
+            if 0 < k - j - 1 <= 16 and k < len(src) and src[k] == "}" and int(src[j + 1:k], 16) % 2**32 <= 0x10FFFF:  # Luau accumulates in a 32-bit unsigned
+                return k + 1, line
+        raise LuauSyntaxError("malformed escape sequence '\\u' (Luau needs the form \\u{XXXX})", line)
     if nxt == "\n":
         return i + 2, line + 1
     if nxt == "\r":
@@ -67,7 +104,9 @@ def _scan_escape(src: str, i: int, line: int) -> tuple[int, int]:
             line += src[i] == "\n"
             i += 1
         return i, line
-    return i + 2, line
+    if nxt in ("", "\0"):
+        raise LuauSyntaxError("malformed escape sequence (backslash before NUL or end of input)", line)
+    return i + 2, line  # any other character: Luau keeps it as-is (`\\q` == "q")
 
 
 def _scan_quoted(src: str, i: int, line: int) -> tuple[int, int]:
@@ -94,7 +133,7 @@ def _scan_interpolated(src: str, i: int, line: int) -> tuple[int, int]:
             raise LuauSyntaxError("unfinished interpolated string", start_line)
         ch = src[i]
         if ch == "\\":
-            i, line = _scan_escape(src, i, line)
+            i, line = _scan_escape(src, i, line, interpolated=True)
         elif ch == "`":
             return i + 1, line
         elif ch == "{":
