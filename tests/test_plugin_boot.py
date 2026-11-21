@@ -250,3 +250,107 @@ def test_offline_gui_apply_creates_a_real_screengui_and_undo_removes_it(rt):
     ''')
     assert out == {"errors": [], "applies": 1, "cls": "ScreenGui", "buttons": 3, "scripts": 0,
                    "n": 17, "gone": True, "unrec": 0}
+
+
+# ---- server mode: HTTP failures must fall back or report, never crash ----
+
+SERVER = '''
+  HEALTH = '{"ok":true,"protocol_version":1}'
+  function SERVE(chat)
+    __mock.http_handler = function(req)
+      if req.Url:find("/health", 1, true) then
+        return {Success=true, StatusCode=200, StatusMessage="OK", Headers={}, Body=HEALTH}
+      end
+      return chat(req)
+    end
+  end
+  function NOTICE(s)
+    for _, t in ipairs(TEXTS()) do if t:find(s, 1, true) then return true end end
+    return false
+  end
+'''
+
+
+def server_on(rt, chat_lua):
+    open_widget(rt)
+    rt.run(SERVER + f" SERVE({chat_lua})")
+    rt.run('SEND("/server on"); __mock.advance(1)')
+
+
+def offline_fallback_result(rt):
+    return rt.json('''
+      SEND("build a house")
+      local chats = 0
+      for _, r in ipairs(__mock.http_log) do if r.Url:find("/chat", 1, true) then chats = chats + 1 end end
+      return {errors=__mock.errors, fallback=NOTICE("answering offline"), apply=BTN("Apply") ~= nil,
+              ws=#workspace:GetChildren(), chats=chats, send=W:FindFirstChild("Send", true).Text}
+    ''')
+
+
+@pytest.mark.parametrize("chat", [
+    'function() return {Success=false, StatusCode=500, StatusMessage="Internal", Headers={}, Body="oops"} end',
+    'function() return {Success=true, StatusCode=200, StatusMessage="OK", Headers={}, Body="not json <html>"} end',
+    'function() return {Success=true, StatusCode=200, StatusMessage="OK", Headers={}, Body="[1,2,3]"} end',
+    'function() return "HttpError: ConnectFail" end',
+])
+def test_server_failure_on_chat_falls_back_offline_without_crashing(rt, chat):
+    server_on(rt, chat)
+    out = offline_fallback_result(rt)
+    assert out == {"errors": [], "fallback": True, "apply": True, "ws": 0, "chats": 1, "send": "Send"}, out
+
+
+def test_server_reply_with_malformed_fields_does_not_crash(rt):
+    body = '{"ok":true,"reply_markdown":42,"verification":"x","warnings":"y","actions":{"type":"nope"}}'
+    server_on(rt, 'function() return {Success=true, StatusCode=200, StatusMessage="OK", Headers={}, Body=%s} end'
+              % lua_str(body))
+    out = rt.json('''SEND("build a house")
+      return {errors=__mock.errors, empty=NOTICE("(empty reply)"), apply=BTN("Apply") ~= nil, send=W:FindFirstChild("Send", true).Text}''')
+    assert out == {"errors": [], "empty": True, "apply": False, "send": "Send"}, out
+
+
+def test_slow_server_times_out_and_falls_back(rt):
+    server_on(rt, 'function() task.wait(500); return {Success=true, StatusCode=200, Headers={}, Body="{}"} end')
+    out = rt.json('''
+      local i = W:FindFirstChild("Input", true); i.Text = "build a house"
+      __mock.fire(W:FindFirstChild("Send", true).MouseButton1Click); __mock.flush(); __mock.advance(1)
+      local busy = W:FindFirstChild("Send", true).Text
+      __mock.click(TB); __mock.flush()          -- close the widget mid-request
+      __mock.advance(130)                        -- past the 120 s client timeout
+      __mock.click(TB); __mock.flush()
+      return {errors=__mock.errors, busy=busy, timeout=NOTICE("timed out"), apply=BTN("Apply") ~= nil,
+              send=W:FindFirstChild("Send", true).Text}
+    ''')
+    assert out == {"errors": [], "busy": "…", "timeout": True, "apply": True, "send": "Send"}, out
+
+
+def test_unload_during_a_pending_request_does_not_error(rt):
+    server_on(rt, 'function() task.wait(20); return {Success=false, StatusCode=503, Headers={}, Body=""} end')
+    out = rt.json('''
+      local i = W:FindFirstChild("Input", true); i.Text = "build a house"
+      __mock.fire(W:FindFirstChild("Send", true).MouseButton1Click); __mock.flush(); __mock.advance(1)
+      __mock.unload(); __mock.advance(30)
+      return {errors=__mock.errors, ws=#workspace:GetChildren(), hist=#__mock.history}
+    ''')
+    assert out == {"errors": [], "ws": 0, "hist": 0}, out
+
+
+def test_newer_server_protocol_blocks_chat_requests(rt):
+    open_widget(rt)
+    rt.run(SERVER + ' HEALTH = \'{"ok":true,"protocol_version":999}\'; SERVE(function() return {Success=true, StatusCode=200, Headers={}, Body="{}"} end)')
+    out = rt.json('''SEND("/server on"); __mock.advance(1); SEND("build a house")
+      local chats = 0
+      for _, r in ipairs(__mock.http_log) do if r.Url:find("/chat", 1, true) then chats = chats + 1 end end
+      return {errors=__mock.errors, old=NOTICE("too old"), chats=chats}''')
+    assert out == {"errors": [], "old": True, "chats": 0}, out
+
+
+def test_second_send_while_busy_sends_one_request(rt):
+    server_on(rt, 'function() task.wait(5); return {Success=true, StatusCode=200, Headers={}, Body=\'{"ok":true,"reply_markdown":"hi"}\'} end')
+    out = rt.json('''
+      local i = W:FindFirstChild("Input", true); local b = W:FindFirstChild("Send", true)
+      i.Text = "one"; __mock.fire(b.MouseButton1Click); __mock.flush(); __mock.advance(1)
+      i.Text = "two"; __mock.fire(b.MouseButton1Click); __mock.flush(); __mock.advance(10)
+      local chats = 0
+      for _, r in ipairs(__mock.http_log) do if r.Url:find("/chat", 1, true) then chats = chats + 1 end end
+      return {errors=__mock.errors, chats=chats, hi=NOTICE("hi"), send=b.Text}''')
+    assert out == {"errors": [], "chats": 1, "hi": True, "send": "Send"}, out

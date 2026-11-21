@@ -164,7 +164,8 @@ function HttpClient.request(self: Client, method: string, path: string, body: an
 		return { ok = false, status = result.StatusCode, body = decoded, error = message }
 	end
 
-	if typeof(decoded) ~= "table" then
+	-- A JSON array also decodes to a table; it is not a protocol response either.
+	if typeof(decoded) ~= "table" or decoded[1] ~= nil then
 		return { ok = false, status = result.StatusCode, body = nil, error = "server response was not a JSON object" }
 	end
 
