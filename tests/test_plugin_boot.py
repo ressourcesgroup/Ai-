@@ -192,3 +192,61 @@ def test_offline_animation_apply_registers_a_preview_id(rt):
               script=script ~= nil}
     ''')
     assert out == {"errors": [], "cards": 2, "preview": True, "failed": False, "notapplied": False, "script": True}
+
+
+def test_double_click_apply_builds_once(rt):
+    open_widget(rt)
+    out = rt.json('''
+      SEND("build a house")
+      local b = BTN("Apply")
+      __mock.fire(b.MouseButton1Click); __mock.fire(b.MouseButton1Click); __mock.flush(); __mock.advance(1)
+      __mock.fire(b.MouseButton1Click); __mock.flush(); __mock.advance(1)
+      local houses = 0
+      for _, c in ipairs(workspace:GetChildren()) do if c.Name == "GodmodeHouse" then houses = houses + 1 end end
+      return {errors=__mock.errors, houses=houses, hist=#__mock.history}
+    ''')
+    assert out == {"errors": [], "houses": 1, "hist": 1}
+
+
+def test_closing_and_reopening_keeps_a_pending_card_usable(rt):
+    open_widget(rt)
+    rt.run('SEND("build a tower")')
+    before = rt.json("return __mock.stats.connections")
+    for _ in range(5):
+        rt.run("__mock.click(TB); __mock.flush(); __mock.click(TB); __mock.flush()")
+    out = rt.json('''
+      local conns = __mock.stats.connections
+      __mock.fire(BTN("Apply").MouseButton1Click); __mock.flush(); __mock.advance(1)
+      return {errors=__mock.errors, en=W.Enabled, conns=conns, ws=#workspace:GetChildren(), hist=#__mock.history}
+    ''')
+    assert out["errors"] == [] and out["en"] is True
+    assert out["conns"] <= before, (before, out)
+    assert out["ws"] == 1 and out["hist"] == 1
+
+
+def test_offline_gui_apply_creates_a_real_screengui_and_undo_removes_it(rt):
+    open_widget(rt)
+    out = rt.json('''
+      SEND("make a main menu gui")
+      local applies = 0
+      for _, d in ipairs(W:GetDescendants()) do
+        if d.ClassName == "TextButton" and d.Text == "Apply" then applies = applies + 1 end
+      end
+      __mock.fire(BTN("Apply").MouseButton1Click); __mock.flush(); __mock.advance(1)
+      local SG = game:GetService("StarterGui")
+      local gui = SG:FindFirstChild("MainMenuGui")
+      local buttons, scripts, n = 0, 0, 0
+      if gui then
+        for _, d in ipairs(gui:GetDescendants()) do
+          n = n + 1
+          if d.ClassName == "TextButton" then buttons = buttons + 1 end
+          if d:IsA("LuaSourceContainer") then scripts = scripts + 1 end
+        end
+      end
+      local cls = gui and gui.ClassName
+      game:GetService("ChangeHistoryService"):Undo()
+      return {errors=__mock.errors, applies=applies, cls=cls, buttons=buttons, scripts=scripts, n=n,
+              gone=SG:FindFirstChild("MainMenuGui") == nil, unrec=#__mock.unrecorded}
+    ''')
+    assert out == {"errors": [], "applies": 1, "cls": "ScreenGui", "buttons": 3, "scripts": 0,
+                   "n": 17, "gone": True, "unrec": 0}
