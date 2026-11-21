@@ -130,6 +130,9 @@ class PluginRuntime:
     def __init__(self, src_dir: Path, plugin_script: str = "GodmodePlugin") -> None:
         self.src_dir = Path(src_dir)
         self.lua = LuaState()
+        self.lua.set_string(
+            "__roblox_api_source", MOCK_PATH.with_name("roblox_api.lua").read_text(encoding="utf-8")
+        )
         self.lua.run(MOCK_PATH.read_text(encoding="utf-8"), "@roblox_mock.lua")
         self.translated: dict[str, str] = {}
         for f in sorted(self.src_dir.glob("*.luau")):
