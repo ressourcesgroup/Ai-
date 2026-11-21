@@ -88,7 +88,7 @@ def _idle() -> Style:
                          lel=(9, 0, 0), rel=(9, 0, 0)))
     return Style("idle", "Breathing idle: chest rises, shoulders lift slightly, head settles.", 2.4, True, "Idle",
                  [Key(0, "exhale", a), Key(1.2, "inhale", b), Key(2.4, "exhale", a)],
-                 keywords=("idle", "breathing", "breathe", "standing"))
+                 keywords=("idle", "breathing", "breathe", "standing", "respirer", "respiration", "respirar", "inactivo"))
 
 
 def _walk() -> Style:
@@ -102,7 +102,7 @@ def _walk() -> Style:
                  1.0, True, "Movement",
                  [Key(0, "contact_L", contact), Key(0.25, "passing_R", passing), Key(0.5, "contact_R", mirror(contact)),
                   Key(0.75, "passing_L", mirror(passing)), Key(1.0, "contact_L", contact)],
-                 keywords=("walk", "walking", "stroll"))
+                 keywords=("walk", "walking", "stroll", "marche", "marcher", "caminar", "camina", "caminando"))
 
 
 def _run() -> Style:
@@ -118,7 +118,7 @@ def _run() -> Style:
                  "high knee drive and a flight phase.", 0.6, True, "Movement",
                  [Key(0, "contact_L", contact), Key(0.15, "flight", flight), Key(0.3, "contact_R", mirror(contact)),
                   Key(0.45, "flight", mirror(flight)), Key(0.6, "contact_L", contact)],
-                 keywords=("run", "running", "sprint", "sprinting", "chase", "fugitive", "flee", "dash"))
+                 keywords=("run", "running", "sprint", "sprinting", "chase", "fugitive", "flee", "dash", "courir", "course", "correr", "corre", "corriendo"))
 
 
 def _jump() -> Style:
@@ -138,7 +138,7 @@ def _jump() -> Style:
                   Key(0.36, "takeoff", takeoff, "Cubic", "In"), Key(0.62, "apex", apex, "Cubic", "Out"),
                   Key(0.84, "land", land, "Cubic", "In"), Key(1.1, "recover", NEUTRAL, "Cubic", "Out")],
                  markers=[{"time": 0.36, "name": "TakeOff", "value": ""}, {"time": 0.84, "name": "Land", "value": ""}],
-                 keywords=("jump", "jumping", "leap", "hop"))
+                 keywords=("jump", "jumping", "leap", "hop", "saut", "sauter", "saute", "saltar", "salto", "salta"))
 
 
 def _punch() -> Style:
@@ -161,7 +161,7 @@ def _punch() -> Style:
                   Key(1.14, "follow_through", follow, "Cubic", "Out"), Key(1.36, "guard", g), Key(1.6, "neutral", NEUTRAL)],
                  markers=[{"time": 0.28, "name": "Hit", "value": "jab"}, {"time": 0.62, "name": "Hit", "value": "cross"},
                           {"time": 1.02, "name": "Hit", "value": "hook"}],
-                 keywords=("punch", "punching", "combo", "jab", "boxing", "uppercut"))
+                 keywords=("punch", "punching", "combo", "jab", "boxing", "uppercut", "poing", "boxe", "pu\u00f1etazo", "punetazo", "boxeo"))
 
 
 def _kick() -> Style:
@@ -175,7 +175,7 @@ def _kick() -> Style:
                   Key(0.47, "kick", extend, "Cubic", "Out"), Key(0.66, "rechamber", chamber),
                   Key(0.88, "plant", GUARD), Key(1.2, "neutral", NEUTRAL)],
                  markers=[{"time": 0.47, "name": "Hit", "value": "kick"}],
-                 keywords=("kick", "kicking", "roundhouse"))
+                 keywords=("kick", "kicking", "roundhouse", "patada", "patear"))
 
 
 def _block() -> Style:
@@ -246,7 +246,7 @@ def _victory() -> Style:
                  [Key(0, "neutral", NEUTRAL), Key(0.3, "anticipation", crouch, "Cubic", "Out"),
                   Key(0.6, "fists_up", up, "Cubic", "Out"), Key(0.85, "pump", pump), Key(1.1, "fists_up", up),
                   Key(1.35, "pump", pump), Key(1.6, "fists_up", up), Key(2.0, "hold", up)],
-                 keywords=("victory", "win", "winner", "celebrate", "celebration", "triumph", "cheer"))
+                 keywords=("victory", "win", "winner", "celebrate", "celebration", "triumph", "cheer", "victoire", "victoria", "celebrer", "celebrar"))
 
 
 def _wave() -> Style:
@@ -256,7 +256,7 @@ def _wave() -> Style:
                  "viewer.", 1.2, True, "Action",
                  [Key(0, "wave_in", a), Key(0.3, "wave_out", b), Key(0.6, "wave_in", a), Key(0.9, "wave_out", b),
                   Key(1.2, "wave_in", a)],
-                 keywords=("wave", "waving", "hello", "greet", "greeting", "bye"))
+                 keywords=("wave", "waving", "hello", "greet", "greeting", "bye", "saluer", "salut", "coucou", "saludar", "saludo", "hola", "adios"))
 
 
 def _shucks() -> Style:
@@ -286,7 +286,7 @@ def _dance() -> Style:
                  "counter-tilted head.", 2.0, True, "Action",
                  [Key(0, "beat1", beat1), Key(0.5, "up", up1), Key(1.0, "beat3", mirror(beat1)), Key(1.5, "up", mirror(up1)),
                   Key(2.0, "beat1", beat1)],
-                 keywords=("dance", "dancing", "groove", "boogie", "party"))
+                 keywords=("dance", "dancing", "groove", "boogie", "party", "danse", "danser", "baile", "bailar", "baila", "bailando"))
 
 
 def _sit() -> Style:
@@ -295,7 +295,7 @@ def _sit() -> Style:
     breathe = merge(seat, P(rootp=(0, -0.97, 0), waist=(-1, 0, 0), neck=(-3, 0, 0), lhip=(90, 0, -4), rhip=(90, 0, 4)))
     return Style("sit", "Seated loop: hips and knees at 90 deg, hands resting on the lap, slow breathing.", 2.4, True,
                  "Idle", [Key(0, "seated", seat), Key(1.2, "breathe", breathe), Key(2.4, "seated", seat)],
-                 keywords=("sit", "sitting", "seated", "chair"))
+                 keywords=("sit", "sitting", "seated", "chair", "assis", "asseoir", "sentado", "sentarse", "sentar"))
 
 
 def _crouch() -> Style:

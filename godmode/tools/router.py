@@ -67,7 +67,7 @@ RULES: dict[str, list[tuple[str, float]]] = {
     "help": [(r"^\s*(help|commands)\s*[?!.]*\s*$", 1.0), (r"\bwhat can you do\b", 1.0), (r"\blist (your )?(tools|commands)\b", 0.9)],
 }
 
-ANIM_WORDS = r"\b(animat\w*|anim|emote|keyframes?|moves?et)\b"
+ANIM_WORDS = r"\b(animat\w*|animaci[oó]n(es)?|anim|emote|keyframes?|moves?et)\b"
 # English + French + Spanish (the three trained prompt languages); accents optional.
 BUILD_VERBS = (r"\b(make|build|create|generate|add|spawn|give me|i want|i need|place|put|set ?up|insert|design"
                r"|fais|faire|fait|cr[ée]e[rz]?|construi[st]|construire|ajoute[rz]?|g[ée]n[èe]re[rz]?|je veux|j'ai besoin"

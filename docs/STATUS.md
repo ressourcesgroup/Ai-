@@ -77,3 +77,18 @@ seen tasks (more candidates → verifier picks a passing one) but do not fix gen
 playtests.
 
 GRIB-v0-static (21 tasks): pretrain ckpt 1/21 · SFT ckpt 1/21 · full system (router + tools + SFT model) **4/21 (19%)**.
+
+## QA round: request relevance (EN/FR/ES)
+
+Measured with `rate.py`, 15 prompts through the real service and the `runs/sft-scripts/best.pt` checkpoint, ~19 s per run.
+
+- **Bug found:** the verifier passed a model script as long as it parsed, linted and looked plausible, even when the script did something else. A French leaderstats request and a Spanish tween-door request shipped unrelated model scripts as "verified".
+- **Fix:** a fourth check, `relevance:model_candidate` (`godmode/server/model_backend.py`), has two parts:
+  - every concept the request names (speed, touch, colour, interval, door, spawn, coins, datastore, …; EN/FR/ES, accent-folded) needs matching API evidence in the code;
+  - the topic in the model's header line (sword, spinning part, door, …) must be asked for by the request.
+- **Result:**
+  - FR leaderstats and ES tween door now fall back to the template tools (verified).
+  - The three freeform prompts (speed boost, coin spawn, colour change) now return "no verified candidate" instead of a wrong script. Before the header check, a ClassicSword script and then a spinning-part script slipped through for the Spanish colour prompt.
+- **FR/ES animation routing:** "fais une animation de danse" and "crea una animación de saltar" used to go to the model. They now reach the procedural animation tool (`ANIM_WORDS` in `godmode/tools/router.py`, FR/ES style keywords in `godmode/anim/styles.py`).
+- **Limitation:** relevance is keyword- and header-based. It is necessary, not sufficient, and a script can still match on incidental APIs. On unseen freeform tasks the model mostly cannot write correct code; the system now says so.
+- Tests: `tests/test_model_relevance.py`. Its negative gates were run: with the fix set aside, the tests fail. Full suite: 617 passed.

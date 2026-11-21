@@ -4,7 +4,8 @@ The checkpoint path comes from the CLI flag (--ckpt) or env GODMODE_CKPT. With
 no checkpoint the backend says so instead of pretending. Sampled candidates are
 kept only if they pass check_structure AND have no lint findings; the longest
 verified candidate wins. A cheap plausibility filter (ASCII, line length, has
-Luau statements, not repetitive) also rejects token soup. If none pass, the reply honestly says the model could
+Luau statements, not repetitive) also rejects token soup, and a request-relevance check (EN/FR/ES concepts ->
+required Roblox API) rejects working code that answers a different request. If none pass, the reply honestly says the model could
 not produce verified code.
 
 Prompt styles:
@@ -71,6 +72,83 @@ def plausibility_problems(code: str) -> list[str]:
     if words and len(set(words)) / len(words) < 0.15:
         problems.append("highly repetitive")
     return problems
+
+
+# Request concept -> API evidence the code must contain. Request patterns cover English, French and Spanish
+# (accents stripped first). A candidate that parses and lints but contains none of the evidence for a concept the
+# user asked for is a different script, not an answer, so it is rejected instead of being shown as "verified".
+RELEVANCE_CONCEPTS: list[tuple[str, str, str]] = [
+    ("speed", r"\b(speed|fast(er)?|vitesse|rapide|velocidad|rapido)\b", r"WalkSpeed|\bSpeed\b"),
+    ("touch", r"\b(touch\w*|touche[rsz]?|tocar?|toque\w*)\b", r"\.Touched\b"),
+    ("colour", r"\b(colou?rs?|couleurs?)\b", r"\bColor3?\b|BrickColor"),
+    ("interval", r"\b(every|each) (\d+|second|minute)|\btoutes les\b|\bchaque (seconde|minute)|\bcada (\d+|segundo|minuto)",
+     r"task\.wait|\bwait\(|\bwhile\b|Heartbeat|task\.delay|Stepped"),
+    ("door", r"\b(doors?|portes?|puertas?)\b", r"(?i)door|puerta|porte"),
+    ("spawn", r"\b(spawns?|spawning|appara[i]?\w*|generer|generar|genera|aparecer|aparezca|aparece)\b",
+     r"Instance\.new|:Clone\("),
+    ("animation", r"\b(animat\w*|animacion(es)?)\b", r"\bAnimation\b|Animator|KeyframeSequence|LoadAnimation|TweenService"),
+    ("datastore", r"\b(data ?stores?|save|saving|sauvegard\w*|enregistr\w*|guardar|guarda)\b", r"DataStoreService"),
+    ("coins", r"\b(coins?|pieces?|monedas?)\b", r"(?i)coin|moneda|piece"),
+    ("jump", r"\b(jump\w*|saut\w*|salt(a|ar|e|o)s?)\b", r"Jump"),
+    ("leaderstats", r"\b(leaderstats|leaderboard|classement)\b", r"leaderstats"),
+    ("teleport", r"\b(teleport\w*|teletransport\w*)\b", r"CFrame|PivotTo|TeleportService|MoveTo"),
+    ("damage", r"\b(kill\w*|damage\w*|lava|degats?|tuer|tue|dano|matar|mata)\b", r"Health|TakeDamage|BreakJoints"),
+    ("remote", r"\bremote ?(event|function)s?\b", r"RemoteEvent|RemoteFunction"),
+    ("sound", r"\b(sounds?|music|musique|sonido|musica)\b", r"\bSound"),
+    ("tween", r"\btween\w*\b", r"TweenService"),
+]
+
+
+# Topic named in the model's header line ("-- Script in ServerScriptService: classicsword tool") -> request words
+# (EN/FR/ES, accents stripped) that would justify it. A header topic the request never mentions means the model
+# wrote a memorised script for another task; keyword evidence alone can be fooled by it (a sword has Color + wait).
+HEADER_TOPICS: list[tuple[str, str, str]] = [
+    ("sword", r"sword", r"\b(swords?|epees?|espadas?|blades?|weapons?|armes?|armas?|melee)\b"),
+    ("gun", r"\bgun|pistol|blaster", r"\b(guns?|pistol\w*|blasters?|fusils?|weapons?|armes?|armas?|shoot\w*|tir\w*|dispar\w*)\b"),
+    ("door", r"door", r"\b(doors?|portes?|puertas?|gates?)\b"),
+    ("coin", r"coin", r"\b(coins?|pieces?|monedas?|currency|money|argent|dinero|cash)\b"),
+    ("shop", r"shop", r"\b(shops?|stores?|boutiques?|magasins?|tiendas?|buy|acheter|comprar)\b"),
+    ("teleport", r"teleport", r"\b(teleport\w*|teletransport\w*)\b"),
+    ("checkpoint", r"checkpoint", r"\b(checkpoints?|point de controle|punto de control|respawn\w*|spawn\w*)\b"),
+    ("lava", r"lava|kill ?brick", r"\b(lava|kill\w*|damage\w*|tuer|degats?|matar|dano)\b"),
+    ("pet", r"\bpets?\b", r"\b(pets?|mascotas?|compagnons?|follow\w*|suivre|seguir)\b"),
+    ("spin", r"spin|rotat", r"\b(spin\w*|rotat\w*|tourn\w*|gir\w*)\b"),
+    ("npc", r"\bnpc", r"\b(npcs?|pnj|patrol\w*|patrouill\w*|patrull\w*|enem\w*|ennemi\w*|bots?)\b"),
+]
+
+
+def header_topic_problems(request: str, code: str) -> list[str]:
+    """Header topics in ``code`` that the request (EN/FR/ES) never asks for."""
+    m = re.match(r"\s*--\s*\w+ in \w+:\s*(.+)", code or "")
+    if not m:
+        return []
+    head, req = m.group(1).lower(), _fold(request or "")
+    return [name for name, head_pat, req_pat in HEADER_TOPICS if re.search(head_pat, head) and not re.search(req_pat, req)]
+
+
+def _fold(text: str) -> str:
+    import unicodedata
+
+    return "".join(ch for ch in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(ch))
+
+
+def relevance_problems(request: str, code: str) -> tuple[list[str], list[str]]:
+    """(missing, checked): request concepts (EN/FR/ES) whose API evidence is absent from ``code``.
+
+    ``checked`` empty means the request named no concept this table knows, so relevance is unjudged (not passed).
+    """
+    req = _fold(request or "")
+    checked, missing = [], []
+    for name, req_pat, code_pat in RELEVANCE_CONCEPTS:
+        if re.search(req_pat, req):
+            checked.append(name)
+            if not re.search(code_pat, code):
+                missing.append(name)
+    off = header_topic_problems(request, code)
+    if off:
+        checked.append("header topic")
+        missing += [f"off-topic {t} script" for t in off]
+    return missing, checked
 
 
 @dataclass
@@ -205,23 +283,28 @@ class ModelBackend:
             res = check_structure(c)
             findings = lint(c)
             noise = plausibility_problems(c)
+            missing, concepts = relevance_problems(request, c)
             checks = [{"check": "structure:model_candidate", "ok": res.ok, "detail": "; ".join(res.errors[:3]) or "ok"},
                       {"check": "lint:model_candidate", "ok": not findings,
                        "detail": "; ".join(f"{f.rule} line {f.line}" for f in findings[:3]) or "no findings"},
-                      {"check": "plausibility:model_candidate", "ok": not noise, "detail": "; ".join(noise) or "ok"}]
+                      {"check": "plausibility:model_candidate", "ok": not noise, "detail": "; ".join(noise) or "ok"},
+                      {"check": "relevance:model_candidate", "ok": not missing,
+                       "detail": (f"does not answer the request: {', '.join(missing)}" if missing
+                                  else (f"matches requested {', '.join(concepts)}" if concepts
+                                        else "unjudged: request names no concept the relevance table knows"))}]
             last_checks = checks
-            if res.ok and not findings and not noise:
+            if res.ok and not findings and not noise and not missing:
                 verified_list.append((c, checks))
             else:
-                key = "structure" if not res.ok else ("lint" if findings else "plausibility")
+                key = ("structure" if not res.ok else "lint" if findings else "plausibility" if noise else "relevance")
                 reasons[key] = reasons.get(key, 0) + 1
         verified = len(verified_list)
         if trace is not None:
             why = ", ".join(f"{v} failed {k}" for k, v in reasons.items())
-            trace.step("Verify", f"{verified}/{len(candidates)} passed structure + lint + plausibility" + (f" ({why})" if why else ""))
+            trace.step("Verify", f"{verified}/{len(candidates)} passed structure + lint + plausibility + relevance" + (f" ({why})" if why else ""))
         if not verified_list:
             return ModelResult(False, f"The model could not produce verified code: 0 of {len(candidates)} sampled "
-                               "candidates passed the structure check, lint and the plausibility filter.", source=self.tag,
+                               "candidates passed the structure check, lint, the plausibility filter and the request-relevance check.", source=self.tag,
                                verification=last_checks, candidates=len(candidates))
         if rerank and verified > 1:
             scored = [(self._mean_logprob(ids, c), c, ch) for c, ch in verified_list]
