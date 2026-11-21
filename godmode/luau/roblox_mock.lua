@@ -1715,6 +1715,12 @@ do
     INST[s].is_root_service = true
     services[name] = s
     X.set_parent(s, game_)
+    if name == "StarterPlayer" then
+      -- Studio places these two containers in every new place
+      for _, cn in ipairs({ "StarterPlayerScripts", "StarterCharacterScripts" }) do
+        local c = new(cn); set_ro(c, "Name", cn); X.set_parent(c, s)
+      end
+    end
     return s
   end
   IMPL.ServiceProvider = {
@@ -1736,6 +1742,16 @@ do
     for _, d in raw_ipairs(X.descendants(game_)) do set[d] = INST[d].parent end
     return set
   end
+  local kfs_n = 0
+  IMPL.KeyframeSequenceProvider = {
+    RegisterKeyframeSequence = function(_, seq)
+      if TYPEOF[seq] ~= "Instance" or INST[seq].class ~= "KeyframeSequence" then
+        error("mock: RegisterKeyframeSequence expects a KeyframeSequence", 2)
+      end
+      kfs_n = kfs_n + 1
+      return "rbxassetid://mock-kfs-" .. kfs_n
+    end,
+  }
   IMPL.ChangeHistoryService = {
     TryBeginRecording = function(_, name, display)
       rec_seq = rec_seq + 1

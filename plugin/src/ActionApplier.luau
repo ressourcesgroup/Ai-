@@ -618,7 +618,7 @@ local function createAnimation(action: any): Result
 	-- Optional local preview id (not an uploaded asset). Failure is reported, not fatal.
 	local previewId: string? = nil
 	local previewOk, previewResult = pcall(function()
-		return game:GetService("AnimationClipProvider"):RegisterKeyframeSequence(sequence)
+		return game:GetService("KeyframeSequenceProvider"):RegisterKeyframeSequence(sequence)
 	end)
 	if previewOk and typeof(previewResult) == "string" then
 		previewId = previewResult

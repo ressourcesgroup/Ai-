@@ -99,7 +99,7 @@ local widgetInfo = DockWidgetPluginGuiInfo.new(
 	300, -- minimum width
 	300 -- minimum height
 )
-local widget = thisPlugin:CreateDockWidgetPluginGui("GodmodeAssistant", widgetInfo)
+local widget = thisPlugin:CreateDockWidgetPluginGuiAsync("GodmodeAssistant", widgetInfo)
 widget.Title = "GODMODE"
 widget.Name = "GodmodeAssistant"
 widget.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -130,7 +130,7 @@ local function trim(text: string): string
 end
 
 local function isLocalUrl(url: string): boolean
-	local host = url:match("^https?://([^/:]+)")
+	local host = url:match("^https?://(%[[^%]]*%])") or url:match("^https?://([^/:]+)")
 	return host == "127.0.0.1" or host == "localhost" or host == "[::1]"
 end
 

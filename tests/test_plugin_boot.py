@@ -56,8 +56,8 @@ def test_boot_is_clean_with_one_toolbar_and_one_hidden_widget(rt):
         enabled=W.Enabled, dep=__mock.deprecated}''')
     assert out["errors"] == [] and out["tb"] == 1 and out["w"] == 1
     assert out["enabled"] is False
-    # known finding: the plugin still uses the deprecated CreateDockWidgetPluginGui
-    assert "Plugin.CreateDockWidgetPluginGui" in out["dep"]
+    # the plugin must use CreateDockWidgetPluginGuiAsync, not the deprecated sync call
+    assert "Plugin.CreateDockWidgetPluginGui" not in out["dep"]
 
 
 def test_toolbar_button_toggles_widget_and_does_not_leak_connections(rt):
@@ -137,3 +137,58 @@ def test_unload_stops_background_loops(rt):
     after = rt.json("return {n=__mock.pending_sleepers(), errors=__mock.errors}")
     assert after["errors"] == []
     assert after["n"] < before, (before, after)
+
+
+SAVE_URL = '''
+  return function(url)
+    __mock.fire(BTN("⚙").MouseButton1Click); __mock.flush()
+    for _, d in ipairs(W:GetDescendants()) do
+      if d.ClassName == "TextBox" and d.PlaceholderText == "http://127.0.0.1:8765" then d.Text = url end
+    end
+    __mock.fire(BTN("Save").MouseButton1Click); __mock.flush(); __mock.advance(1)
+    local warned = false
+    for _, t in ipairs(TEXTS()) do if t:find("is not on this computer:", 1, true) then warned = true end end
+    return warned
+  end
+'''
+
+
+@pytest.mark.parametrize("url,warned", [
+    ("http://[::1]:8765", False),
+    ("http://127.0.0.1:8765", False),
+    ("http://localhost:8765", False),
+    ("http://example.com:8765", True),
+])
+def test_saving_a_server_url_warns_only_for_remote_hosts(rt, url, warned):
+    open_widget(rt)
+    rt.run("SAVE = (function() " + SAVE_URL + " end)()")
+    out = rt.json(f"local w = SAVE({lua_str(url)}); return {{errors=__mock.errors, warned=w}}")
+    assert out == {"errors": [], "warned": warned}
+
+
+def lua_str(s):
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def test_offline_animation_apply_registers_a_preview_id(rt):
+    open_widget(rt)
+    out = rt.json('''
+      SEND("make an idle animation")
+      -- every proposed action has its own card; apply them all in order
+      local applies = {}
+      for _, d in ipairs(W:GetDescendants()) do
+        if d.ClassName == "TextButton" and d.Text == "Apply" then applies[#applies + 1] = d end
+      end
+      for _, b in ipairs(applies) do __mock.fire(b.MouseButton1Click); __mock.flush(); __mock.advance(1) end
+      local preview, failed, notapplied = false, false, false
+      for _, t in ipairs(TEXTS()) do
+        if t:find("preview id", 1, true) then preview = true end
+        if t:find("could not register", 1, true) then failed = true end
+        if t:find("Did NOT apply", 1, true) then notapplied = true end
+      end
+      local sp = game:GetService("StarterPlayer")
+      local script = sp:FindFirstChild("StarterCharacterScripts") and sp.StarterCharacterScripts:FindFirstChild("PlayGodmodeIdle")
+      return {errors=__mock.errors, cards=#applies, preview=preview, failed=failed, notapplied=notapplied,
+              script=script ~= nil}
+    ''')
+    assert out == {"errors": [], "cards": 2, "preview": True, "failed": False, "notapplied": False, "script": True}
